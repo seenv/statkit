@@ -47,9 +47,9 @@ TEST = Config(
     listener_host="chi-prod",
     listener_ip="10.140.82.103",
     base_port=50000,
-    run_num=1,
-    parallels= (1, 5), # (3, 4, 5),
-    time_frames=5,
+    run_num=3,
+    parallels= (1, 3, 5), # (3, 4, 5),
+    time_frames=20,
     app="iperf",
 )
 

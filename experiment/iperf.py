@@ -29,21 +29,22 @@ def start_iperf_server(cfg: Config, tunnel_id: str) -> subprocess.Popen[str]:
         cfg.remote_env,
         "globus-streams-launch "
         f"-p {cfg.base_port} {shlex.quote(tunnel_id)} "
-        f"iperf3 -s -p {cfg.base_port} -1",
+        f"iperf3 -s -p {cfg.base_port} -1 ",
         localhost=cfg.localhost,
     )
     logging.info("LISTENER: started iperf3 server (local pid=%s)", p.pid)
     return p
 
 
-def run_iperf_client(cfg: Config, tunnel_id: str, contact_port: int, parallel: int) -> subprocess.CompletedProcess[str]:
+def run_iperf_client(cfg: Config, tunnel_id: str, contact_port: int, parallel: int, run_idx: int) -> subprocess.CompletedProcess[str]:
     return run_subprocess(
         cfg.initiator_host,
         cfg.remote_env,
         "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
-        f"-P {parallel} -t {cfg.time_frames} -O 3 -Z",
+        f"-J --logfile /home/cc/statkit/reports/{parallel}/{run_idx}/iperf.json "
+        f"-P {parallel} -t {cfg.time_frames} -O 3 -Z ",
         localhost=cfg.localhost,
         timeout=cfg.time_frames + 120,
     )
@@ -56,7 +57,7 @@ def iperf_main(cfg: Config) -> None:
 
             # restart gridftp + get gateway IDs
             restart_gridftp(cfg, cfg.initiator_ap)
-            time.sleep(2)
+            time.sleep(1)
             initiator_stream_ap_id = get_stream_gateway_id(cfg, cfg.initiator_ap)
             logging.info("%s: gateway id=%s", cfg.initiator_ap.upper(), initiator_stream_ap_id)
 
@@ -80,15 +81,16 @@ def iperf_main(cfg: Config) -> None:
                 init_listener_env(cfg, tunnel_id)
                 time.sleep(2)
                 iperf_srv = start_iperf_server(cfg, tunnel_id)
-                time.sleep(1)
+                time.sleep(2)
 
                 # init initiator env + discover contact port
                 contact_port = init_initiator_env(cfg, tunnel_id)
                 logging.info("INITIATOR: contact_port=%s", contact_port)
                 time.sleep(1)
-
+                
+                # TODO: add pkill -9 iperf
                 # run iperf client
-                cp = run_iperf_client(cfg, tunnel_id, contact_port, parallel)
+                cp = run_iperf_client(cfg, tunnel_id, contact_port, parallel, run_idx)
                 logging.info("INITIATOR: iperf3 stdout:\n%s", cp.stdout.strip())
                 if cp.stderr.strip():
                     logging.info("INITIATOR: iperf3 stderr:\n%s", cp.stderr.strip())

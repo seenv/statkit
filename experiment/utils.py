@@ -110,7 +110,7 @@ def start_tunnel(cfg: Config, initiator_id: str, listener_id: str) -> str:
     return parse_uuid(cp.stdout + "\n" + cp.stderr)
 
 
-def start_statkit(cfg: Config, parallel, run_idx) -> None:
+def start_statkit(cfg: Config, parallel: int, run_idx: int) -> None:
     hosts = (cfg.initiator_ap, cfg.listener_ap,
             cfg.initiator_host, cfg.listener_host)
     
@@ -119,9 +119,9 @@ def start_statkit(cfg: Config, parallel, run_idx) -> None:
             host,
             cfg.remote_env,
             "python "
-            "/home/cc/statkit/monitor/launcher.py "
-            f"--out /home/cc/statkit/monitor/mon/{parallel}/{run_idx} --duration {cfg.time_frames + 1500} &"
-            "echo $! >/home/cc/statkit/launcher.pid",
+            "~/statkit/monitor/launcher.py "
+            f"--out ~/statkit/reports/{parallel}/{run_idx} --duration {cfg.time_frames + 120} &"
+            "echo $! > ~/statkit/launcher.pid",
             localhost=cfg.localhost,
         )
         logging.info("STATKIT: started on %s remote_pid=%s", host, cp.pid)
