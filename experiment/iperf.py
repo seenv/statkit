@@ -3,8 +3,7 @@ from __future__ import annotations
 import logging
 #import os
 import time
-#from datetime import datetime
-#from pathlib import Path
+
 import shlex
 import subprocess
 from typing import Optional
@@ -24,13 +23,14 @@ def start_iperf_server(cfg: Config, tunnel_id: str, parallel: int, run: int) -> 
     cp = popen_subprocess(
         host,
         cfg.remote_env,
+        f"mkdir -p {shlex.quote(out_dir)} && "
         "globus-streams-launch "
         f"-p {cfg.base_port} {shlex.quote(tunnel_id)} "
         f"iperf3 -s -p {cfg.base_port} -1 --timestamps "
         f"-J --logfile {shlex.quote(out_dir)}/iperf.json ",
         localhost=cfg.localhost,
     )
-    logging.debug("%s: Started iperf3 server %s\n", host.upper(), cp)
+    logging.debug("%s: Started iperf3 server \n", host.upper())
 
 
 def run_iperf_client(cfg: Config, tunnel_id: str, contact_port: int, t : int, parallel: int, run: int) -> subprocess.CompletedProcess[str]:
@@ -39,13 +39,14 @@ def run_iperf_client(cfg: Config, tunnel_id: str, contact_port: int, t : int, pa
     cp = run_subprocess(
         host,
         cfg.remote_env,
+        f"mkdir -p {shlex.quote(out_dir)} && "
         "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
         #f"-J --logfile {shlex.quote(out_dir)}/iperf.json "
         f"--timestamps -P {parallel} -O 5 -Z -R -t {t} ",
         localhost=cfg.localhost,
-        timeout=t + 120,
+        timeout= t + 120,
     )
     logging.debug("%s: Started iperf3 server %s\n", host.upper(), cp.stdout.strip())
     return cp
