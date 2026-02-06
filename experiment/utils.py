@@ -152,10 +152,12 @@ def start_statkit(cfg: Config, t : int, parallel: int, run_idx: int, check: bool
         cp = popen_subprocess(
             host,
             cfg.remote_env,
-            "python "
-            "~/statkit/monitor/launcher.py "
-            f"--out {shlex.quote(out_dir)} --duration {t + 120} "
-            f"echo $! > {shlex.quote(out_dir)}/launcher\.pid ", 
+            f"mkdir -p {shlex.quote(out_dir)} && "
+            "pids=$(pgrep -d, -f globus-gridftp-server || true); "
+            "python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
+            #"python ~/statkit/monitor/launcher.py --pids 187333"
+            f"--out {shlex.quote(out_dir)} --duration {t + 120} & "
+            f"echo $! > {shlex.quote(out_dir)}/launcher.pid ", 
             localhost=cfg.localhost,
         )
         logging.debug("%s: Started on statkit %s", host.upper(), cp.stdout)

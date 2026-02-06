@@ -23,11 +23,10 @@ def start_iperf_server(cfg: Config, tunnel_id: str, parallel: int, run: int) -> 
     cp = popen_subprocess(
         host,
         cfg.remote_env,
-        f"mkdir -p {shlex.quote(out_dir)} && "
         "globus-streams-launch "
         f"-p {cfg.base_port} {shlex.quote(tunnel_id)} "
         f"iperf3 -s -p {cfg.base_port} -1 --timestamps "
-        f"-J --logfile {shlex.quote(out_dir)}/iperf.json ",
+        f"-J --logfile {out_dir}/iperf.json & ",
         localhost=cfg.localhost,
     )
     logging.debug("%s: Started iperf3 server \n", host.upper())
@@ -39,11 +38,10 @@ def run_iperf_client(cfg: Config, tunnel_id: str, contact_port: int, t : int, pa
     cp = run_subprocess(
         host,
         cfg.remote_env,
-        f"mkdir -p {shlex.quote(out_dir)} && "
         "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
-        #f"-J --logfile {shlex.quote(out_dir)}/iperf.json "
+        f"-J --logfile {shlex.quote(out_dir)}/iperf.json "
         f"--timestamps -P {parallel} -O 5 -Z -R -t {t} ",
         localhost=cfg.localhost,
         timeout= t + 120,
@@ -61,12 +59,12 @@ def iperf_main(cfg: Config) -> None:
         for run in range(1, cfg.run_num + 1)
     )
     
-    total_runs = len(cfg.time_frames) * len(cfg.parallels) * cfg.run_num    
+    total_runs = len(cfg.time_frames) * len(cfg.parallels) * cfg.run_num
     for idx, (duration, parallel, run) in enumerate(test_config, start=1):
         logging.info("Test %d / %d : duration: %s / run %s / parallel %s", idx, total_runs, duration, run , parallel)
 
         # initial safty check reseting/cleaning up
-        restart_gridftp(cfg)
+        #restart_gridftp(cfg)
         cleanup_iperf(cfg)
         time.sleep(5)
 
