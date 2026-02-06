@@ -18,8 +18,7 @@ from .util import CsvLogger, now_mono_s, now_wall_s, read_text
 
 def _procstat_procs_running_blocked() -> Tuple[Optional[int], Optional[int]]:
     """
-    total runnable tasks exist, total blocked on I/O
-    /proc/stat has:
+    /proc/stat:
       procs_running <N>
       procs_blocked <N>
     Returns (procs_running, procs_blocked)
@@ -81,7 +80,7 @@ def _read_cgroup_cpu_throttle() -> dict[str, Optional[int]]:
     """
     Parse cgroup cpu stat 
     to find the cases whenin mini-apps one of containers didn;t start
-    v2 cpu.stat has:
+    v2 cpu.stat:
       nr_periods <N>
       nr_throttled <N>
       throttled_usec <N>
@@ -124,38 +123,56 @@ def _read_cgroup_cpu_throttle() -> dict[str, Optional[int]]:
     return out
 
 
+def _expand_pid_tree(root_pids: Sequence[int], *, recursive: bool = True) -> list[int]:
+    """
+    Return sorted unique PIDs = roots + children that exist now.
+    """
+    out: set[int] = set()
+    for r in root_pids:
+        try:
+            p = psutil.Process(int(r))
+        except Exception:
+            continue
+        out.add(int(p.pid))
+        try:
+            for ch in p.children(recursive=recursive):
+                out.add(int(ch.pid))
+        except Exception:
+            pass
+    return sorted(out)
+
+
 @dataclass
 class CpuMonitorConfig:
     interval_s: float = 1.0   # TODO: try a test with setting the interval to duration      
     pids: Optional[Sequence[int]] = None
-    #
 
+    # tree handling
+    include_children: bool = True
+    recursive_children: bool = True
+
+    # per thread logging, writes in another csv
+    record_threads: bool = True
 
 class CpuMonitor:
     """
-    A) Utilization:
-        - per-core cpu_percent (blocking interval for precise window)
-        - mean/max  (wasn't useful at all so commented out /p50/p95)
-        - total cpu_percent
-    B) Saturation:
-        - loadavg 1/5/15 (for unix)
-        - procs_running/procs_blocked (in linux using /proc/stat)
-        - context switches / interrupts deltas (cpu_stats)
-        - cgroup throttling counters
-    B) Breakdown:
-        - cpu time breakdown per interval (%) for user/system/iowait/irq/softirq/steal/idle/...
-    D) CPU time deltas (s) per interval
-        - system cpu_times deltas
-        - per process cpu time deltas and derived utilization
+      - system cpu utilization + saturation + breakdown per interval
+      - aggregate cpi usage of a target PID set + expanded to child processes
+      - per-thread cpu deltas (pid, tid rows)
     """
+
     # TODO: monitor specific processes(with all threads and children) by name and not only pids 
     # also consider that some additional threads will be created after and during the workflow
     # TODO: get the per processes stats, and specifically for active processes 
     # plus the ones from input pids or names
-    def __init__(self, cfg: CpuMonitorConfig, out_csv_path: str) -> None:
+    #def __init__(self, cfg: CpuMonitorConfig, out_csv_path: str) -> None:
+    def __init__(self, cfg: CpuMonitorConfig, out_cpu_path: str, *,
+        out_thread_path: str, flush_every: int = 1) -> None:
+        
         self.cfg = cfg
         self.logger = CsvLogger(
-            out_csv_path,
+            #out_csv_path
+            out_cpu_path,
             fieldnames=[
                 "ts_wall_s",
                 "ts_mono_s",
@@ -164,14 +181,14 @@ class CpuMonitor:
                 "cpu_physical",
                 "cpu_freq_cur_mhz_mean",
                 "cpu_freq_cur_mhz_max",
-                # A
+
                 "cpu_total_percent",
                 "cpu_mean_core_percent",
                 "cpu_max_core_percent",
                 #"cpu_p50_core_percent",
                 #"cpu_p95_core_percent",
                 "cpu_core_count_sampled",
-                # B
+
                 "loadavg_1",
                 "loadavg_5",
                 "loadavg_15",
@@ -186,7 +203,7 @@ class CpuMonitor:
                 "cg_throttled_usec",
                 "cg_nr_throttled_d",
                 "cg_throttled_usec_d",
-                # C (percent)
+                # cpu time breakdown (%)
                 "pct_user",
                 "pct_system",
                 "pct_idle",
@@ -196,7 +213,7 @@ class CpuMonitor:
                 "pct_steal",
                 "pct_guest",
                 "pct_guest_nice",
-                # D (seconds)
+                # cpu time deltas (s)
                 "sec_user_d",
                 "sec_system_d",
                 "sec_idle_d",
@@ -207,39 +224,113 @@ class CpuMonitor:
                 "sec_guest_d",
                 "sec_guest_nice_d",
                 "sec_total_d",
-                # per-process aggregate
+                # process-tree aggregate
+                "proc_pid_count",
                 "proc_cpu_sec_d_sum",
                 "proc_cpu_pct_total_sum",
+                "proc_cpu_cores_equiv",
             ],
-            flush_every=1,
+            flush_every=flush_every,
         )
+        
+        self.thread_logger: Optional[CsvLogger] = None
+        if cfg.record_threads:
+            if not out_thread_path:
+                raise ValueError("record_threads=True requires out_thread_path")
+            self.thread_logger = CsvLogger(
+                out_thread_path,
+                fieldnames=[
+                    "ts_wall_s",
+                    "ts_mono_s",
+                    "dt_s",
+                    "pid",
+                    "tid",
+                    "thr_cpu_sec_d",
+                    "thr_cpu_pct_total",
+                    "thr_cpu_cores_equiv",
+                ],
+                flush_every=flush_every,
+            )
+        
         self._cpu_logical = psutil.cpu_count(logical=True) or 0
         self._cpu_physical = psutil.cpu_count(logical=False) or 0
 
+        # snapshots
         self._prev_cpu_times = psutil.cpu_times()
         self._prev_cpu_stats = psutil.cpu_stats()
         self._prev_cg = _read_cgroup_cpu_throttle()
-        self._prev_mono: Optional[float] = None
+        #self._prev_mono: Optional[float] = None
 
+        # per pid previous cpu times: pid -> (user+system) # TODO: or just user!?
         self._proc_prev_cpu: Dict[int, float] = {}
-        if cfg.pids:
-            for pid in cfg.pids:
-                pid = int(pid)
-                try:
-                    p = psutil.Process(pid)
-                    ct = p.cpu_times()
-                    self._proc_prev_cpu[pid] = float(ct.user + ct.system)
-                except Exception:
-                    self._proc_prev_cpu[pid] = float("nan")
 
+        # per thread previous cpu times: (pid, tid) -> (user+system)
+        self._thr_prev_cpu: Dict[Tuple[int, int], float] = {}
+
+        # psutil cpu_percent internal state
         try:
             psutil.cpu_percent(interval=None, percpu=True)
-            psutil.cpu_percent(interval=None, percpu=False)
         except Exception:
             pass
 
+        # pid cpu baselines (procs may not exist yet)
+        if cfg.pids:
+            for pid in self._current_pid_list():
+                self._proc_prev_cpu[pid] = self._read_pid_cpu(pid)
+
+            if self.thread_logger is not None:
+                self._thread_baselines(self._current_pid_list())
+
+        # if cfg.pids:
+        #     for pid in _expand_pid_tree(cfg.pids):
+        #         try:
+        #             p = psutil.Process(pid)
+        #             ct = p.cpu_times()
+        #             self._proc_prev_cpu[pid] = float(ct.user + ct.system)
+        #         except Exception:
+        #             self._proc_prev_cpu[pid] = float("nan")
+
+        # try:
+        #     psutil.cpu_percent(interval=None, percpu=True)
+        #     psutil.cpu_percent(interval=None, percpu=False)
+        # except Exception:
+        #     pass
+
+    # def close(self) -> None:
+    #     self.logger.close()
+
+    # def _freq_stats(self) -> Tuple[Optional[float], Optional[float]]:
+    #     try:
+    #         freqs = psutil.cpu_freq(percpu=True)
+    #         if not freqs:
+    #             return None, None
+    #         cur = [f.current for f in freqs if f and f.current is not None]
+    #         if not cur:
+    #             return None, None
+    #         return float(sum(cur) / len(cur)), float(max(cur))
+    #     except Exception:
+    #         return None, None
+
+    # def _loadavg(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    #     try:
+    #         la = psutil.getloadavg()
+    #         return float(la[0]), float(la[1]), float(la[2])
+    #     except Exception:
+    #         return None, None, None
+
     def close(self) -> None:
-        self.logger.close()
+        try:
+            self.logger.close()
+        finally:
+            if self.thread_logger is not None:
+                self.thread_logger.close()
+
+    def _current_pid_list(self) -> list[int]:
+        if not self.cfg.pids:
+            return []
+        if self.cfg.include_children:
+            return _expand_pid_tree(self.cfg.pids, recursive=self.cfg.recursive_children)
+        return sorted({int(x) for x in self.cfg.pids})
 
     def _freq_stats(self) -> Tuple[Optional[float], Optional[float]]:
         try:
@@ -260,58 +351,157 @@ class CpuMonitor:
         except Exception:
             return None, None, None
 
-    def _proc_cpu_deltas(self, dt_s: float) -> Tuple[Optional[float], Optional[float]]:
-        if not self.cfg.pids or dt_s <= 0 or self._cpu_logical <= 0:
-            return None, None
+    @staticmethod
+    def _read_pid_cpu(pid: int) -> float:
+        """
+        Returns (user+system) cpu time in seconds for the pid, or NaN on failure.
+        """
+        try:
+            p = psutil.Process(pid)
+            ct = p.cpu_times()
+            return float(ct.user + ct.system)
+        except Exception:
+            return float("nan")
+
+    #def _proc_cpu_deltas(self, dt_s: float) -> Tuple[Optional[float], Optional[float]]:
+    #def _proc_cpu_deltas(self, dt_s: float, pids: Sequence[int]) -> Tuple[Optional[float], Optional[float]]:
+    def _proc_cpu_deltas(self, pid_list: list[int], dt_s: float) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        """
+        returns:
+          (sum_cpu_seconds, pct_of_total_logical, cores_equiv)
+        """
+        if not pid_list or dt_s <= 0 or self._cpu_logical <= 0:
+            return None, None, None
         total_cpu_sec = 0.0
         total_cpu_pct = 0.0
-        for pid in self.cfg.pids:
-            pid = int(pid)
-            try:
-                p = psutil.Process(pid)
-                ct = p.cpu_times()
-                cur = float(ct.user + ct.system)
-            except Exception:
-                cur = float("nan")
-
-            prev = self._proc_prev_cpu.get(pid, float("nan"))
+        #for pid in self.cfg.pids:
+        #for pid in _expand_pid_tree(self.cfg.pids):
+        # for pid in pid:
+        #     pid = int(pid)
+        #     try:
+        #         p = psutil.Process(pid)
+        #         ct = p.cpu_times()
+        #         cur = float(ct.user + ct.system)
+        #     except Exception:
+        #         cur = float("nan")
+        
+            # prev = self._proc_prev_cpu.get(pid, float("nan"))
+            # self._proc_prev_cpu[pid] = cur
+            # prev = self._proc_prev_cpu.get(pid)
+            # self._proc_prev_cpu[pid] = cur
+        for pid in pid_list:
+            cur = self._read_pid_cpu(pid)
+            prev = self._proc_prev_cpu.get(pid)
             self._proc_prev_cpu[pid] = cur
 
-            if not (cur == cur and prev == prev):  # NaN
+            # if not (cur == cur and prev == prev):  # NaN
+            if prev is None or not (cur == cur and prev == prev):  # new pid or NaN
                 continue
             d = cur - prev
             if d < 0:
                 continue
             total_cpu_sec += d
-            total_cpu_pct += (d / (dt_s * float(self._cpu_logical))) * 100.0
-        return total_cpu_sec, total_cpu_pct
+            # TODO: check the normalize
+            # total_cpu_pct += (d / (dt_s * float(self._cpu_logical))) * 100.0
+        pct_total = (total_cpu_sec / (dt_s * float(self._cpu_logical))) * 100.0
+        cores_equiv = total_cpu_sec / dt_s
+        # return total_cpu_sec, total_cpu_pct
+        return total_cpu_sec, pct_total, cores_equiv
+
+    def _thread_baselines(self, pid_list: list[int]) -> None:
+        for pid in pid_list:
+            try:
+                p = psutil.Process(pid)
+                for th in p.threads():
+                    key = (pid, int(th.id))
+                    self._thr_prev_cpu[key] = float(th.user_time + th.system_time)
+            except Exception:
+                continue
+
+
+    def _write_thread_deltas(self, pid_list: list[int], dt_s: float, ts_wall: float, ts_mono: float) -> None:
+        if self.thread_logger is None:
+            return
+        if dt_s <= 0 or self._cpu_logical <= 0:
+            return
+
+        cur_map: Dict[Tuple[int, int], float] = {}
+        for pid in pid_list:
+            try:
+                p = psutil.Process(pid)
+                for th in p.threads():
+                    key = (pid, int(th.id))
+                    cur_map[key] = float(th.user_time + th.system_time)
+            except Exception:
+                continue
+
+        # update and emit deltas
+        for key, cur in cur_map.items():
+            prev = self._thr_prev_cpu.get(key)
+            self._thr_prev_cpu[key] = cur
+            if prev is None:
+                continue
+            if not (cur == cur and prev == prev):  # NaN
+                continue
+
+            d = cur - prev
+            if d < 0:
+                continue
+
+            thr_cores_equiv = d / dt_s
+            thr_pct_total = (d / (dt_s * float(self._cpu_logical))) * 100.0
+
+            pid, tid = key
+            self.thread_logger.write({
+                "ts_wall_s": ts_wall,
+                "ts_mono_s": ts_mono,
+                "dt_s": float(dt_s),
+                "pid": int(pid),
+                "tid": int(tid),
+                "thr_cpu_sec_d": float(d),
+                "thr_cpu_pct_total": float(thr_pct_total),
+                "thr_cpu_cores_equiv": float(thr_cores_equiv),
+            })
+
+        # TODO: why it didn't fix it!
+        for k in list(self._thr_prev_cpu.keys()):
+            if k not in cur_map:
+                del self._thr_prev_cpu[k]
 
     def sample_once(self) -> None:
-        # a blocking, per core read for a precise window
         # record timestamps before + after to compute the real dt
         t0_wall = now_wall_s()
         t0_mono = now_mono_s()
 
         per_core = psutil.cpu_percent(interval=self.cfg.interval_s, percpu=True)
-        cpu_total_pct = psutil.cpu_percent(interval=None, percpu=False)
-
         t1_mono = now_mono_s()
         dt = t1_mono - t0_mono
         if dt <= 0:
             dt = float(self.cfg.interval_s)
-
-        # A: utilization stats over cores
-        cores = sorted(float(x) for x in per_core) if per_core else []
-        mean_core = (sum(cores) / len(cores)) if cores else None
-        max_core = (max(cores)) if cores else None
+        #cpu_total_pct = psutil.cpu_percent(interval=None, percpu=False)
+        # cpu_total_pct = (sum(per_core) / len(per_core)) if per_core else 0.0
+        # t1_mono = now_mono_s()
+        # dt = t1_mono - t0_mono
+        # if dt <= 0:
+        #     dt = float(self.cfg.interval_s)
+        
+        # utilization stats over cores
+        # cores = sorted(float(x) for x in per_core) if per_core else []
+        # mean_core = (sum(cores) / len(cores)) if cores else None
+        # max_core = (max(cores)) if cores else None
         # p50 = percentile(cores, 50.0) if cores else None
         # p95 = percentile(cores, 95.0) if cores else None
+        cores = [float(x) for x in per_core] if per_core else []
+        cpu_mean_core = (sum(cores) / len(cores)) if cores else None
+        cpu_max_core = (max(cores)) if cores else None
+        # total over same interval: mean over cores
+        cpu_total_pct = cpu_mean_core
 
-        # B: saturation
+        # saturation
         la1, la5, la15 = self._loadavg()
         procs_running, procs_blocked = _procstat_procs_running_blocked()
+        
         cur_stats = psutil.cpu_stats()
-
         ctx_d = cur_stats.ctx_switches - self._prev_cpu_stats.ctx_switches
         intr_d = cur_stats.interrupts - self._prev_cpu_stats.interrupts
         soft_d = cur_stats.soft_interrupts - self._prev_cpu_stats.soft_interrupts
@@ -330,7 +520,7 @@ class CpuMonitor:
             pass
         self._prev_cg = cg
 
-        # C + D: breakdown via cpu_times deltas
+        # breakdown via cpu_times deltas
         cur_times = psutil.cpu_times()
         prev_times = self._prev_cpu_times
         self._prev_cpu_times = cur_times
@@ -349,21 +539,30 @@ class CpuMonitor:
         sec_guest_nice_d = dfield("guest_nice")
 
         # total sum of all deltas
-        sec_total_d = 0.0
+        sec_total_d: Optional[float] = 0.0
         for fname in getattr(cur_times, "_fields", ()):
             try:
                 sec_total_d += max(0.0, dfield(fname))
             except Exception:
                 pass
-        sec_total_d = sec_total_d if sec_total_d > 0 else None
+        if sec_total_d is not None and sec_total_d <= 0:
+            sec_total_d = None
 
         def pct(x: float) -> Optional[float]:
             if sec_total_d is None or sec_total_d <= 0:
                 return None
             return (x / sec_total_d) * 100.0
 
-        # D: per process cpu time deltas
-        proc_cpu_sec_sum, proc_cpu_pct_sum = self._proc_cpu_deltas(dt)
+        # per process cpu time deltas
+        # pid_list = _expand_pid_tree(self.cfg.pids) if self.cfg.pids else []
+        # proc_cpu_sec_sum, proc_cpu_pct_sum = self._proc_cpu_deltas(dt, pid_list)
+        # proc_cpu_cores_equiv = (proc_cpu_sec_sum / dt) if (proc_cpu_sec_sum is not None and dt > 0) else None
+        pid_list = self._current_pid_list()
+        proc_cpu_sec_sum, proc_cpu_pct_sum, proc_cpu_cores_equiv = self._proc_cpu_deltas(pid_list, dt)
+
+        # per thread rows
+        if self.thread_logger is not None and pid_list:
+            self._write_thread_deltas(pid_list, dt, t0_wall, t1_mono)
 
         freq_mean, freq_max = self._freq_stats()
 
@@ -371,13 +570,13 @@ class CpuMonitor:
             "ts_wall_s": t0_wall,
             "ts_mono_s": t1_mono,
             "dt_s": float(dt),
-            "cpu_logical": self._cpu_logical,
-            "cpu_physical": self._cpu_physical,
+            "cpu_logical": int(self._cpu_logical),
+            "cpu_physical": int(self._cpu_physical),
             "cpu_freq_cur_mhz_mean": freq_mean,
             "cpu_freq_cur_mhz_max": freq_max,
-            "cpu_total_percent": float(cpu_total_pct),
-            "cpu_mean_core_percent": mean_core,
-            "cpu_max_core_percent": max_core,
+            "cpu_total_percent": cpu_total_pct,
+            "cpu_mean_core_percent": cpu_mean_core,
+            "cpu_max_core_percent": cpu_max_core,
             #"cpu_p50_core_percent": p50,
             #"cpu_p95_core_percent": p95,
             "cpu_core_count_sampled": len(cores),
@@ -414,6 +613,8 @@ class CpuMonitor:
             "sec_guest_d": sec_guest_d,
             "sec_guest_nice_d": sec_guest_nice_d,
             "sec_total_d": sec_total_d,
+            "proc_pid_count": len(pid_list),
             "proc_cpu_sec_d_sum": proc_cpu_sec_sum,
             "proc_cpu_pct_total_sum": proc_cpu_pct_sum,
+            "proc_cpu_cores_equiv": proc_cpu_cores_equiv,
         })

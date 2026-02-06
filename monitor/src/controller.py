@@ -19,8 +19,8 @@ from .net_monitor import NetMonitorConfig, make_net_monitor
 # talk to John to make sure of the processes to parse 
 # TODO: some reports are more the durations!!!!!!!
 
-def _run_cpu(out_path: str, interval_s: float, pids: Optional[Sequence[int]], stop: Event) -> None:
-    mon = CpuMonitor(CpuMonitorConfig(interval_s=interval_s, pids=pids), out_path)
+def _run_cpu(out_path: str, out_thread_path: str, interval_s: float, pids: Optional[Sequence[int]], stop: Event) -> None:
+    mon = CpuMonitor(CpuMonitorConfig(interval_s=interval_s, pids=pids), out_path, out_thread_path=out_thread_path)
     try:
         while not stop.is_set():
             mon.sample_once()
@@ -102,30 +102,26 @@ class Controller:
         self.procs = [
             Process(
                 target=_run_cpu,
-                kwargs={"out_path": str(out / "cpu.csv"), "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "stop": self.stop},
-                daemon=True,
+                kwargs={"out_path": str(out / "cpu.csv"), "out_thread_path": str(out / "cpu_thread.csv"), 
+                        "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "stop": self.stop},
+                daemon=True
             ),
             Process(
                 target=_run_mem,
                 kwargs={"out_path": str(out / "mem.csv"), "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "stop": self.stop},
-                daemon=True,
+                daemon=True
             ),
             Process(
                 target=_run_disk,
-                kwargs={"out_path": str(out / "disk.csv"), "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "disk_path": self.cfg.disk_path_for_usage, "stop": self.stop},
-                daemon=True,
+                kwargs={"out_path": str(out / "disk.csv"), "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, 
+                        "disk_path": self.cfg.disk_path_for_usage, "stop": self.stop},
+                daemon=True
             ),
             Process(
                 target=_run_net,
-                kwargs={
-                    "out_path": str(out / "net.csv"),
-                    "interval_s": self.cfg.interval_s,
-                    "backend": self.cfg.net_backend,
-                    "nic_include": self.cfg.nic_include_regex,
-                    "nic_exclude": self.cfg.nic_exclude_regex,
-                    "stop": self.stop,
-                    "stop_flag_path": self.stop_flag_path,
-                },
+                kwargs={"out_path": str(out / "net.csv"), "interval_s": self.cfg.interval_s, "backend": self.cfg.net_backend,
+                    "nic_include": self.cfg.nic_include_regex, "nic_exclude": self.cfg.nic_exclude_regex, "stop": self.stop, 
+                    "stop_flag_path": self.stop_flag_path},
                 daemon=True,
             ),
         ]
