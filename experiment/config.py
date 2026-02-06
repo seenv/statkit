@@ -19,22 +19,21 @@ from typing import Sequence, TypedDict, Literal, Dict, Mapping
 
 # TODO: all the hardcoded stuff :/
 
+# def _parse_flag(flag: str, default: bool = False) -> bool:
+#     return flag in sys.argv if sys.argv else default
 
-def _parse_list(name: str, default: list[str]) -> list[str]:
-    raw = os.getenv(name)
-    if not raw:
-        return default
-    return [x.strip() for x in raw.split(",") if x.strip()]
-
-def _parse_int_list(name: str, default: list[int]) -> list[int]:
-    return [int(x) for x in _parse_list(name, [str(d) for d in default])]
+def _parse_int_list(s: str) -> list[int]:
+    try:
+        return [int(x.strip()) for x in s.split(",") if x.strip()]
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"Invalid int list: {s}") from e
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--verbose", "-v", action="store_true", default=False)
-    p.add_argument("--run", type=int, default=2, help="Number of times to test one config")
-    p.add_argument("--parallel", "-P", type=int, default= 1, help="Number of parallel streams")
-    p.add_argument("--time", "-t", type=int, default=5, help="Duration of each stream (seconds)")
+    p.add_argument("--run", type=int, default=1, help="Number of times to test one config")
+    p.add_argument("--parallel", "-P", type=_parse_int_list, default= [1], help="Number of parallel streams")
+    p.add_argument("--time", "-t", type=_parse_int_list, default=[5], help="Duration of each stream (seconds)")
     p.add_argument("--app", "-a", type=str, default="iperf", help="Number of times to test one config")
     return p.parse_args()
 
@@ -70,8 +69,8 @@ class Config:
 TEST = Config(
     verbose=args.verbose,
     run_num=args.run,
-    parallels=[args.parallel],
-    time_frames=[args.time],  #20,
+    parallels=args.parallel,
+    time_frames=args.time,  #20,
     app=args.app,   #"iperf",
     localhost="localhost",
     hosts=Hosts(
