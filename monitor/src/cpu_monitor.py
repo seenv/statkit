@@ -148,6 +148,10 @@ class CpuMonitor:
         - system cpu_times deltas
         - per process cpu time deltas and derived utilization
     """
+    # TODO: monitor specific processes(with all threads and children) by name and not only pids 
+    # also consider that some additional threads will be created after and during the workflow
+    # TODO: get the per processes stats, and specifically for active processes 
+    # plus the ones from input pids or names
     def __init__(self, cfg: CpuMonitorConfig, out_csv_path: str) -> None:
         self.cfg = cfg
         self.logger = CsvLogger(
