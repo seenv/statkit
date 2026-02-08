@@ -31,10 +31,12 @@ def _parse_int_list(s: str) -> list[int]:
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--verbose", "-v", action="store_true", default=False)
-    p.add_argument("--run", type=int, default=1, help="Number of times to test one config")
-    p.add_argument("--parallel", "-P", type=_parse_int_list, default= [1], help="Number of parallel streams")
-    p.add_argument("--time", "-t", type=_parse_int_list, default=[5], help="Duration of each stream (seconds)")
-    p.add_argument("--app", "-a", type=str, default="iperf", help="Number of times to test one config")
+    p.add_argument("--run", "-r", type=int, default=1, help="Total tests per each config")
+    p.add_argument("--parallel", "-P", type=_parse_int_list, default= [1], help="Parallel streams value")
+    p.add_argument("--time", "-t", type=_parse_int_list, default=[5], help="Duration of each stream (sec)")
+    p.add_argument("--app", "-a", type=str, default="iperf", help="Application (iperf | )")
+    p.add_argument("--blocks", "-b", type=_parse_int_list, default=[4], help="Gridftp blocksize")
+    p.add_argument("--output", "-o", type=str, default="/tmp", help="Log file's base path (remote)")
     return p.parse_args()
 
 args = parse_args()
@@ -53,6 +55,7 @@ class Config:
     parallels: Sequence[int]
     time_frames: Sequence[int]
     app: str
+    blocks: Sequence[int]
 
     # hosts
     localhost: str
@@ -65,6 +68,7 @@ class Config:
     remote_env: str
     local_env: str
 
+# python statkit/experiment/main.py --blocks 64 --time 5 -r 1 -P 3 --output /tmp
 
 TEST = Config(
     verbose=args.verbose,
@@ -72,6 +76,7 @@ TEST = Config(
     parallels=args.parallel,
     time_frames=args.time,  #20,
     app=args.app,   #"iperf",
+    blocks=args.blocks,
     localhost="localhost",
     hosts=Hosts(
         ap={"initiator": "chi-c2cs", "listener": "chi-p2cs"},
@@ -79,7 +84,7 @@ TEST = Config(
     ),
     listener_ip="10.140.82.103",
     base_port=50000,
-    report_dir="/tmp",
+    report_dir=args.output, #"/tmp",
     remote_env="/home/cc/streams-cli/bin/activate",
-    local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()),
+    local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser())
 )

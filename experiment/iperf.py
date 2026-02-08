@@ -10,31 +10,33 @@ from typing import Optional
 
 from config import Config, Role
 
-from utils import popen_subprocess, run_subprocess
+from utils import popen_subprocess, run_subprocess, blk_config
 from utils import restart_gridftp, get_stream_id, start_tunnel, stop_tunnel
 from utils import init_listener_env, init_initiator_env
 from utils import start_statkit, stop_statkit, cleanup_iperf
 
 
+#TODO: run a direct stream with iper before each test through the tunnel
 
-def start_iperf_server(cfg: Config, tunnel_id: str, parallel: int, run: int) -> subprocess.Popen[str]:
-    host = cfg.hosts.ep.get("listener")
-    out_dir = f"{cfg.report_dir}/{parallel}/{run}"
+
+def start_iperf_server(cfg: Config, host: str, tunnel_id: str, out_dir: str) -> subprocess.Popen[str]:
+    #host = cfg.hosts.ep.get("listener")
     cp = popen_subprocess(
+    #cp = run_subprocess(
         host,
         cfg.remote_env,
         "globus-streams-launch "
         f"-p {cfg.base_port} {shlex.quote(tunnel_id)} "
         f"iperf3 -s -p {cfg.base_port} -1 --timestamps "
-        f"-J --logfile {out_dir}/iperf.json & ",
+        f"-J --logfile {out_dir}/iperf.json & "
+        "echo $! " ,
         localhost=cfg.localhost,
     )
-    logging.debug("%s: Started iperf3 server \n", host.upper())
+    logging.info("%s: Started iperf3 server \n", host.upper())
 
 
-def run_iperf_client(cfg: Config, tunnel_id: str, contact_port: int, t : int, parallel: int, run: int) -> subprocess.CompletedProcess[str]:
-    host = cfg.hosts.ep.get("initiator")
-    out_dir = f"{cfg.report_dir}/{parallel}/{run}"
+def run_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    #host = cfg.hosts.ep.get("initiator")
     cp = run_subprocess(
         host,
         cfg.remote_env,
@@ -42,29 +44,36 @@ def run_iperf_client(cfg: Config, tunnel_id: str, contact_port: int, t : int, pa
         f"{shlex.quote(tunnel_id)} "
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
         f"-J --logfile {shlex.quote(out_dir)}/iperf.json "
-        f"--timestamps -P {parallel} -O 5 -Z -R -t {t} ",
+        f"--timestamps -P {parallel} -O 3 -Z -R -t {t} ",
         localhost=cfg.localhost,
         timeout= t + 120,
     )
-    logging.debug("%s: Started iperf3 server %s\n", host.upper(), cp.stdout.strip())
+    n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
+    tail = "\n".join(cp.stdout.splitlines()[-n:])
+    logging.info("%s: iPerf3 log (when -J is not set)\n%s", host.upper(), tail)
     return cp
 
 
 def iperf_main(cfg: Config) -> None:
-    
     test_config = (
-        (duration, parallel, run)
+        (block, duration, parallel, run)
+        for block in cfg.blocks
         for duration in cfg.time_frames
         for parallel in cfg.parallels
         for run in range(1, cfg.run_num + 1)
     )
-    
-    total_runs = len(cfg.time_frames) * len(cfg.parallels) * cfg.run_num
-    for idx, (duration, parallel, run) in enumerate(test_config, start=1):
-        logging.info("Test %d / %d : duration: %s / run %s / parallel %s", idx, total_runs, duration, run , parallel)
 
+    total_runs = len(cfg.time_frames) * len(cfg.parallels) * cfg.run_num * len(cfg.blocks)
+    for idx, (block, duration, parallel, run) in enumerate(test_config, start=1):
+        logging.info("\n--------------- Test %d / %d : duration: %s / run %s / parallel %s", idx, total_runs, duration, run , parallel)
+        out_dir = f"{cfg.report_dir}/{block}/{parallel}/{run}"
+        
         # initial safty check reseting/cleaning up
-        #restart_gridftp(cfg)
+        restart_gridftp(cfg)
+        if run == 1:
+            blk_config(cfg, block)
+            time.sleep(5)
+
         cleanup_iperf(cfg)
         time.sleep(5)
 
@@ -78,7 +87,7 @@ def iperf_main(cfg: Config) -> None:
         try:
             # launch statkit
             logging.info("Starting the statkit monitoring on the hosts")
-            start_statkit(cfg, duration, parallel, run, True)
+            start_statkit(cfg, duration, parallel, run, out_dir)
             time.sleep(2)
             
             # init listener env 
@@ -92,13 +101,13 @@ def iperf_main(cfg: Config) -> None:
             time.sleep(2)
             
             logging.info("Starting iperf server")
-            start_iperf_server(cfg, tunnel_id, parallel, run)
-            time.sleep(2)
+            start_iperf_server(cfg, cfg.hosts.ep.get("listener"), tunnel_id, out_dir)
+            time.sleep(5)           # it takes more for them to initiates! TODO: find a better way
             # TODO: add pkill -9 iperf
             
             # run iperf client
             logging.info("Starting iperf client")
-            iperf_clt = run_iperf_client(cfg, tunnel_id, contact_port, duration, parallel, run)
+            iperf_clt = run_iperf_client(cfg, cfg.hosts.ep.get("initiator"), tunnel_id, contact_port, duration, parallel, run, out_dir)
             time.sleep(5)
 
         finally:
@@ -106,6 +115,7 @@ def iperf_main(cfg: Config) -> None:
             # TODO: check why monitor finishes before transfer!
             stop_statkit(cfg)
             time.sleep(2)
+
             stop_tunnel(cfg, tunnel_id)
-            time.sleep(5)
+            time.sleep(20)
             # TODO: check the tunnel status and continue when it stopped

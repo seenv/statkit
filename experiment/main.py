@@ -9,19 +9,17 @@ def setup_logging(verbose: bool) -> None:
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(levelname)s %(message)s",
+        # datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[logging.StreamHandler(), logging.FileHandler("statkit.log")],
     )
 
+# TODO: define a class and create ctrl to run the setup pipeline 
 def main() -> None:
     setup_logging(TEST.verbose)
     logging.info("MAIN: Starting the experiment: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     if TEST.app == "iperf":
         iperf_main(TEST)
-
-    #else:
-    #    mini_apps_main()
-
 
 if __name__ == "__main__":
     main()

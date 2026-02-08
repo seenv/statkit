@@ -14,6 +14,12 @@ from typing import Iterable, Optional, Sequence, List, Dict
 from config import Config, Role
 
 
+# def make_session_id() -> str:
+#     """Generate a sortable unique session id: YYYYMMDD-HHMMSS-<8hex>"""
+#     ts = time.strftime("%Y%m%d-%H%M%S")
+#     short = uuid.uuid4().hex[:8]
+#     return f"{ts}-{short}"
+
 # run subprocess via ssh python agent
 def _ssh_base(host: str) -> list[str]:
     return ["ssh", host, "bash", "-lc"]
@@ -75,19 +81,35 @@ def _parse_uuid(output: str) -> str:
 def _parse_contact_port(output: str) -> int:
     m = re.search(
         r"Your contact string is:\s*(?P<host>[^:\s]+)\s*:\s*(?P<port>\d+)",
-        output, flags=re.IGNORECASE,
+        output, flags=re.IGNORECASE
     )
     if not m:
         raise RuntimeError(f"Could not find contact string / port in output:\n{output}")
     return int(m.group("port"))
 
 
+def blk_config(cfg: Config, blk: int, check: bool = True) -> None:
+    for host in cfg.hosts.ap.values():
+        cp = run_subprocess(
+            host, None,
+            f"sudo sed -i -E 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' /etc/gridftp.d/zdebug; "
+            f"cat /etc/gridftp.d/zdebug ",
+            localhost=cfg.localhost
+        )
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"{host.upper()}: Failed changing the blocksize"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+        head = "\n".join(cp.stdout.splitlines()[:3])
+        logging.info("%s: Gridftp blocksize config:\n%s", host.upper(), head)
+
+
 def restart_gridftp(cfg: Config, check: bool = True) -> None:
     for host in cfg.hosts.ap.values():
         cp = run_subprocess(
-            host,
-            None,
-            "sudo systemctl restart gridftp-server-restarter.service",
+            host, None,
+            "sudo systemctl restart gridftp-server-restarter.service ",
             localhost=cfg.localhost,
         )
         if check and cp.returncode != 0:
@@ -99,18 +121,17 @@ def restart_gridftp(cfg: Config, check: bool = True) -> None:
 
 
 def cleanup_iperf(cfg: Config, check: bool = True) -> None:
-    for host in cfg.hosts.ep.values():
-        cp = run_subprocess(
-            host, None,
-            "pkill -TERM iperf || true",
-            localhost=cfg.localhost,
-        )
+    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+    for host in hosts:
+    # for host in cfg.hosts.ep.values():
+    # host = cfg.hosts.ep.get("listener")
+        cp = run_subprocess(host, None,"pkill -TERM -f '[i]perf3' || true ", localhost=cfg.localhost)
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"{host.upper()}: Failed killing iperf\n"
-                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+                f"{host.upper()}: Failed killing iperf\n "
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr} "
             )
-        logging.debug("%s: Killed iperf (%s)", host.upper(), cp.stdout.strip())
+    logging.debug("%s: Killed iperf %s", host.upper(), cp.stdout)
 
 
 def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
@@ -123,35 +144,36 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         out[role] = _parse_uuid(cp.stdout + "\n" + cp.stderr)
-        logging.debug("%s: Stream id (%s)", host.upper(), cp.stdout.strip())
+        logging.debug("%s: Stream Gateway id %s", host.upper(), cp.stdout.strip())
     missing = {"initiator", "listener"} - set(out.keys())
     if missing:
         raise RuntimeError(f"Missing stream ids for roles: {sorted(missing)}")
     return out
 
 
-def start_tunnel(cfg: Config, initiator_id: str, listener_id: str) -> str:
+def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, check: bool = True) -> str:
     cp = run_subprocess(
-        cfg.localhost,
-        cfg.local_env,
+        cfg.localhost, cfg.local_env,
         "globus streams tunnel create "
         "--lifetime-minutes 360 -v "
         f"{shlex.quote(initiator_id)} {shlex.quote(listener_id)}",
         localhost=cfg.localhost,
     )
+    if check and cp.returncode != 0:
+        raise RuntimeError(
+            f"{cfg.localhost.upper()}: Failed creating the streams tunnel\n"
+            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+        )
     id = _parse_uuid(cp.stdout + "\n" + cp.stderr)
-    logging.debug("LOCAL: tunnel_id=%s", id)
+    logging.debug("%s: Created the stream tunnel with id: %s", cfg.localhost.upper(), id)
     return id
 
 
-def start_statkit(cfg: Config, t : int, parallel: int, run_idx: int, check: bool = True) -> None:
+def start_statkit(cfg: Config, t : int, parallel: int, run_idx: int, out_dir: str, check: bool = True) -> None:
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
-    out_dir = f"{cfg.report_dir}/{parallel}/{run_idx}"
-    procs = []
     for host in hosts:
         cp = popen_subprocess(
-            host,
-            cfg.remote_env,
+            host, cfg.remote_env,
             f"mkdir -p {shlex.quote(out_dir)} && "
             "pids=$(pgrep -d, -f globus-gridftp-server || true); "
             "python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
@@ -174,21 +196,26 @@ def init_listener_env(cfg: Config, tunnel_id: str, check: bool = True) -> None:
     )
     if check and cp.returncode != 0:
         raise RuntimeError(
-            f"{host.upper()}: Failed initiating environment\n"
+            f"{host.upper()}: Failed initializing listener environment\n"
             f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
         )
-    logging.debug("%s: environment initialize:\n%s", host.upper(), cp.stdout.strip())
+    logging.debug("%s: Listener environment initializing:\n%s", host.upper(), cp.stdout.strip())
 
 
-def init_initiator_env(cfg: Config, tunnel_id: str) -> int:
+def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> int:
     host = cfg.hosts.ep.get("initiator")
     cp = run_subprocess(
         host, cfg.remote_env,
         f"globus-streams environment initialize {shlex.quote(tunnel_id)} ",
         localhost=cfg.localhost,
     )
+    if check and cp.returncode != 0:
+        raise RuntimeError(
+            f"{host.upper()}: Failed initializing initiator environment\n"
+            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+        )
+    logging.debug("%s: Initiator environment initializing:\n%s", host.upper(), cp.stdout.strip())
     combined = cp.stdout + "\n" + cp.stderr
-    logging.debug("%s: Environment initialize:\n%s", host.upper(), cp.stdout.strip())
     return _parse_contact_port(combined)
 
 
@@ -196,18 +223,16 @@ def stop_statkit(cfg: Config) -> None:
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
         cp = popen_subprocess(
-            host,
-            None,
+            host, None,
             r"pkill -TERM -f 'monitor/launcher\.py' || true",
             localhost=cfg.localhost,
         )
-        logging.debug("%s: Stopped statkit with return code=%s", host, cp.returncode)#cp.stdout.strip())
-
+        logging.debug("%s: Stopped statkit ", host)
+        
 
 def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
     cp = run_subprocess(
-        cfg.localhost,
-        cfg.local_env,
+        cfg.localhost, cfg.local_env,
         f"globus streams tunnel stop {shlex.quote(tunnel_id)}",
         localhost=cfg.localhost,
         check=False,
