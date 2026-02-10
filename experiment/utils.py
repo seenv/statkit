@@ -109,7 +109,8 @@ def restart_gridftp(cfg: Config, check: bool = True) -> None:
     for host in cfg.hosts.ap.values():
         cp = run_subprocess(
             host, None,
-            "sudo systemctl restart gridftp-server-restarter.service ",
+            "sudo systemctl restart gridftp-server-restarter.service "
+            "sudo systemctl restart apache2.service ",
             localhost=cfg.localhost,
         )
         if check and cp.returncode != 0:
