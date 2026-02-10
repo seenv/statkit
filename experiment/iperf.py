@@ -67,7 +67,6 @@ def iperf_main(cfg: Config) -> None:
     for idx, (block, duration, parallel, run) in enumerate(test_config, start=1):
         logging.info("\n--------------- Test %d / %d : duration: %s / run %s / parallel %s", idx, total_runs, duration, run , parallel)
         out_dir = f"{cfg.report_dir}/{block}/{parallel}/{run}"
-        
         # initial safty check reseting/cleaning up
         restart_gridftp(cfg)
         if run == 1:
@@ -107,7 +106,7 @@ def iperf_main(cfg: Config) -> None:
             
             # run iperf client
             logging.info("Starting iperf client")
-            iperf_clt = run_iperf_client(cfg, cfg.hosts.ep.get("initiator"), tunnel_id, contact_port, duration, parallel, run, out_dir)
+            iperf_clt = run_iperf_client(cfg, cfg.hosts.ep.get("initiator"), tunnel_id, contact_port, duration, parallel, out_dir)
             time.sleep(5)
 
         finally:
