@@ -31,8 +31,7 @@ def _parse_int_list(s: str) -> list[int]:
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--verbose", "-v", action="store_true", default=False)
-    #p.add_argument("--baseline", action="store_true", default=False, help="Enable baseline tests")
-    p.add_argument("--baseline", action="store_false", default=True, help="Enable baseline tests")
+    p.add_argument("--baseline", action="store_true", default=False, help="Enable baseline tests")
     p.add_argument("--run", "-r", type=int, default=1, help="Total tests per each config")
     p.add_argument("--parallel", "-P", type=_parse_int_list, default= [1], help="Parallel streams value")
     p.add_argument("--time", "-t", type=_parse_int_list, default=[5], help="Duration of each stream (sec)")
@@ -71,10 +70,9 @@ class Config:
     remote_env: str
     local_env: str
 
-
 TEST = Config(
     verbose=args.verbose,
-    baseline=args.verbose,
+    baseline=args.baseline,
     run_num=args.run,
     parallels=args.parallel,
     time_frames=args.time,  #20,
