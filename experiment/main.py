@@ -3,15 +3,7 @@ from datetime import datetime
 
 from config import TEST
 from iperf import iperf_main
-
-def setup_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(message)s",
-        # datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[logging.StreamHandler(), logging.FileHandler("statkit.log")],
-    )
+from utils import setup_logging
 
 # TODO: define a class and create ctrl to run the setup pipeline 
 def main() -> None:

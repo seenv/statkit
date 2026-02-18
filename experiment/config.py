@@ -31,11 +31,13 @@ def _parse_int_list(s: str) -> list[int]:
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--verbose", "-v", action="store_true", default=False)
+    #p.add_argument("--baseline", action="store_true", default=False, help="Enable baseline tests")
+    p.add_argument("--baseline", action="store_false", default=True, help="Enable baseline tests")
     p.add_argument("--run", "-r", type=int, default=1, help="Total tests per each config")
     p.add_argument("--parallel", "-P", type=_parse_int_list, default= [1], help="Parallel streams value")
     p.add_argument("--time", "-t", type=_parse_int_list, default=[5], help="Duration of each stream (sec)")
     p.add_argument("--app", "-a", type=str, default="iperf", help="Application (iperf | )")
-    p.add_argument("--blocks", "-b", type=_parse_int_list, default=[4], help="Gridftp blocksize")
+    p.add_argument("--blocks", "-b", type=_parse_int_list, default=[32], help="Gridftp blocksize")
     p.add_argument("--output", "-o", type=str, default="/tmp", help="Log file's base path (remote)")
     return p.parse_args()
 
@@ -51,6 +53,7 @@ class Hosts:
 class Config:
     # test params
     verbose: bool
+    baseline: bool
     run_num: int
     parallels: Sequence[int]
     time_frames: Sequence[int]
@@ -68,19 +71,23 @@ class Config:
     remote_env: str
     local_env: str
 
-# python statkit/experiment/main.py --blocks 64 --time 5 -r 1 -P 3 --output /tmp
 
 TEST = Config(
     verbose=args.verbose,
+    baseline=args.verbose,
     run_num=args.run,
     parallels=args.parallel,
     time_frames=args.time,  #20,
     app=args.app,   #"iperf",
     blocks=args.blocks,
     localhost="localhost",
+    # hosts=Hosts(
+    #     ap={"initiator": "chi-c2cs", "listener": "chi-p2cs"},
+    #     ep={"initiator": "chi-cons", "listener": "chi-prod"},
+    # ),
     hosts=Hosts(
-        ap={"initiator": "chi-c2cs", "listener": "chi-p2cs"},
-        ep={"initiator": "chi-cons", "listener": "chi-prod"},
+        ap={"initiator": "chi-c2cs-tf", "listener": "chi-p2cs"},
+        ep={"initiator": "chi-cons-tf", "listener": "chi-prod"},
     ),
     listener_ip="10.140.82.103",
     base_port=50000,
