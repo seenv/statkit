@@ -147,11 +147,11 @@ def blk_config(cfg: Config, blk: int, check: bool = True) -> None:
         )
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"{host.upper()}: Failed changing the blocksize"
+                f"IPERF: Failed changing the blocksize on {host.upper()}"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         head = "\n".join(cp.stdout.splitlines()[:5])
-        logging.info("%s: Gridftp blocksize config:\n%s", host.upper(), head)
+        logging.debug("IPERF: Gridftp blocksize config on %s:\n%s", host.upper(), head)
 
 
 def restart_gridftp(cfg: Config, check: bool = True) -> None:
@@ -164,10 +164,10 @@ def restart_gridftp(cfg: Config, check: bool = True) -> None:
         )
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"{host.upper()}: Failed restarting gridftp\n"
+                f"IPERF: Failed restarting gridftp on {host.upper()}\n"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
-        logging.debug("%s: Restarted gridftp (%s)", host.upper(), cp.stdout.strip())
+        logging.debug("IPERF: Restarted gridftp on %s (%s)", host.upper(), cp.stdout.strip())
 
 
 def cleanup_iperf(cfg: Config, check: bool = True) -> None:
@@ -178,10 +178,10 @@ def cleanup_iperf(cfg: Config, check: bool = True) -> None:
         cp = run_subprocess(host, None,"pkill -TERM -f '[i]perf3' || true ", localhost=cfg.localhost)
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"{host.upper()}: Failed killing iperf\n "
+                f"IPERF: Failed killing iperf on {host.upper()}\n "
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr} "
             )
-    logging.debug("%s: Killed iperf %s", host.upper(), cp.stdout)
+        logging.debug("IPERF: Killed iperf on %s %s", host.upper(), cp.stdout)
 
 
 def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
@@ -190,12 +190,12 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
         cp = run_subprocess(host, None, "gcs stream-gateway list \n", localhost=cfg.localhost)
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"{host.upper()}: Failed gettuing the stream id:\n"
+                f"IPERF: Failed getting the stream id on {host.upper()}\n"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         #out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr)
-        out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, "2nd")
-        logging.debug("%s: Stream Gateway id %s", host.upper(), cp.stdout.strip())
+        out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, "AP")
+        logging.debug("IPERF: Stream Gateway id on %s %s", host.upper(), cp.stdout.strip())
     missing = {"initiator", "listener"} - set(out.keys())
     if missing:
         raise RuntimeError(f"Missing stream ids for roles: {sorted(missing)}")
@@ -212,11 +212,11 @@ def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, check: bool =
     )
     if check and cp.returncode != 0:
         raise RuntimeError(
-            f"{cfg.localhost.upper()}: Failed creating the streams tunnel\n"
+            f"LOCAL: Failed creating the streams tunnel on {cfg.localhost.upper()}\n"
             f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
         )
     id = _parse_uid(cp.stdout + "\n" + cp.stderr)
-    logging.debug("%s: Created the stream tunnel with id: %s", cfg.localhost.upper(), id)
+    logging.debug("LOCAL: Created the stream tunnel on %s with id: %s", cfg.localhost.upper(), id)
     return id
 
 
@@ -231,11 +231,11 @@ def start_statkit(cfg: Config, t : int, parallel: int, run_idx: int, out_dir: st
             #"pids=$(pgrep -d, -f globus-gridftp-server|iperf || true); "
             "pids=$(pgrep -d, -f globus-gridftp-server || true); "
             "python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
-            f"--out {shlex.quote(out_dir)} --duration {t + 120} & "
+            f"--out {shlex.quote(out_dir)} --duration {t * 120} & "
             f"echo $! > {shlex.quote(out_dir)}/launcher.pid ", 
             localhost=cfg.localhost,
         )
-        logging.debug("%s: Started on statkit %s", host.upper(), cp.stdout)
+        logging.debug("IPERF: Started on statkit on %s %s", host.upper(), cp.stdout)
 
 
 def init_listener_env(cfg: Config, tunnel_id: str, check: bool = True) -> None:
@@ -243,16 +243,16 @@ def init_listener_env(cfg: Config, tunnel_id: str, check: bool = True) -> None:
     cp = run_subprocess(
         host, cfg.remote_env,
         "globus-streams environment initialize "
-        f"--listener-contact-string {cfg.listener_ip}:{cfg.base_port} "
+        f"--listener-contact-string {cfg.listener_ip}:{cfg.ep_port} "
         f"{shlex.quote(tunnel_id)}",
         localhost=cfg.localhost,
     )
     if check and cp.returncode != 0:
         raise RuntimeError(
-            f"{host.upper()}: Failed initializing listener environment\n"
+            f"IPERF: Failed initializing listener environment on {host.upper()}\n"
             f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
         )
-    logging.debug("%s: Listener environment initializing:\n%s", host.upper(), cp.stdout.strip())
+    logging.debug("IPERF: Listener environment initializing on %s:\n%s", host.upper(), cp.stdout.strip())
 
 
 def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> int:
@@ -264,10 +264,10 @@ def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> int:
     )
     if check and cp.returncode != 0:
         raise RuntimeError(
-            f"{host.upper()}: Failed initializing initiator environment\n"
+            f"IPERF: Failed initializing initiator environment on {host.upper()}\n"
             f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
         )
-    logging.debug("%s: Initiator environment initializing:\n%s", host.upper(), cp.stdout.strip())
+    logging.debug("IPERF: Initiator environment initializing on %s:\n%s", host.upper(), cp.stdout.strip())
     combined = cp.stdout + "\n" + cp.stderr
     return _parse_contact_port(combined)
 
@@ -280,7 +280,7 @@ def stop_statkit(cfg: Config) -> None:
             r"pkill -TERM -f 'monitor/launcher\.py' || true",
             localhost=cfg.localhost,
         )
-        logging.debug("%s: Stopped statkit ", host)
+        logging.debug("IPERF: Stopped statkit on %s", host.upper())
 
 _STATE = re.compile(r"^\s*State:\s*(?P<state>\S+)\s*$", re.MULTILINE)
 _STATUS = re.compile(r"^\s*Status:\s*(?P<status>.+?)\s*$", re.MULTILINE)
@@ -314,16 +314,8 @@ def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
         localhost=cfg.localhost,
         check=False,
     )
-    state = status = ""
-    for _ in range(24):
-        state, status = status_tunnel(cfg, tunnel_id)
-        #if state == "STOPPED" or state == "DELETED":
-        if state != "STOPPING":
-            logging.info("LOCAL: Stop streams tunnel %s: %s", tunnel_id, status)
-            break
-        time.sleep(5)
-    else:
-        raise RuntimeError(f"Tunnel did not stop (state={state}): {tunnel_id}\n{status}")
+    state, status = status_tunnel(cfg, tunnel_id)
+    logging.info("LOCAL: Stop stream tunnel %s: %s \n\n", tunnel_id, state)
 
 
 def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
@@ -337,5 +329,73 @@ def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
     if out:
         logging.info("LOCAL: Delete streams tunnel %s: %s", tunnel_id, out)
     else:
-        raise RuntimeError(f"Tunnel was not deleted: {tunnel_id}\n")
+        raise RuntimeError(f"LOCAL: Tunnel was not deleted: {tunnel_id}\n")
 
+def start_iperf_server(cfg: Config, host: str, port:int, tunnel_id: str, out_dir: str) -> subprocess.Popen[str]:
+    #host = cfg.hosts.ep.get("listener")
+    cp = popen_subprocess(
+    #cp = run_subprocess(
+        host, cfg.remote_env,
+        "globus-streams-launch "
+        f"-p {port} {shlex.quote(tunnel_id)} "
+        f"iperf3 -s -p {port} -1 --timestamps "
+        f"-J --logfile {out_dir}/iperf.json --forceflush & "
+        "echo $! " ,
+        localhost=cfg.localhost,
+    )
+    logging.info("IPERF: Started iperf3 server on host %s", host.upper())
+
+def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    #host = cfg.hosts.ep.get("initiator")
+    cp = run_subprocess(
+        host, cfg.remote_env,
+        "globus-streams-launch "
+        f"{shlex.quote(tunnel_id)} "
+        f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
+        f"-J --logfile {shlex.quote(out_dir)}/iperf.json --forceflush "
+        f"-P {parallel} -i 10 -O 10 -Z -R -t {t} --timestamps ",
+        localhost=cfg.localhost,
+        timeout= t * 120,
+    )
+    n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
+    tail = "\n".join(cp.stdout.splitlines()[-n:])
+    logging.info("IPERF: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
+    return cp
+
+def base_start_iperf_server(cfg: Config, host: str, port: int, out_dir: str) -> subprocess.Popen[str]:
+    #host = cfg.hosts.ep.get("listener")
+    cp = popen_subprocess(
+        host, None,
+        f"iperf3 -s -p {port} -1 --timestamps "
+        f"-J --logfile {shlex.quote(out_dir)}/iperf.json --forceflush & "
+        "echo $! " ,
+        localhost=cfg.localhost,
+    )
+    logging.info("BASELINE: Started iperf3 server on %s", host.upper())
+
+def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    cp = run_subprocess(
+        host, cfg.remote_env,
+        f"iperf3 -c {listener_ip} -p {port} "
+        f"-J --logfile {shlex.quote(out_dir)}/iperf.json --forceflush "
+        f"-P {parallel} -i 10 -O 10 -Z -R -t {t} --timestamps ",
+        localhost=cfg.localhost,
+        timeout= t * 120,
+    )
+    n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
+    tail = "\n".join(cp.stdout.splitlines()[-n:])
+    logging.info("BASELINE: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
+    return cp
+
+def record_ping(cfg: Config, host: str, dest_ip: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    cp = run_subprocess(
+        host, None,
+        #f"netserver   # on listener side "
+        #f"netperf -H <listener_ip> -t TCP_RR -l 30   # from initiator side"
+        #f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} > {shlex.quote(out_dir)}/ping.log ",
+        #f"ping -4 -n -D -i 0.5 -c 20 {dest_ip} > {shlex.quote(out_dir)}/ping.log ",
+        f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} | tee {shlex.quote(out_dir)}/ping.log ",
+        localhost=cfg.localhost,
+    )
+    logging.debug("%s: Ping log %s", host.upper(), cp.stdout)
+    return cp

@@ -38,6 +38,8 @@ def parse_args():
     p.add_argument("--app", "-a", type=str, default="iperf", help="Application (iperf | )")
     p.add_argument("--blocks", "-b", type=_parse_int_list, default=[32], help="Gridftp blocksize")
     p.add_argument("--output", "-o", type=str, default="/tmp", help="Log file's base path (remote)")
+    p.add_argument("--listen", "-ip",  type=str,required=True, help="The IP address of the listener") # default="10.52.2.167"
+    p.add_argument("--listenap", type=str, required=True, help="The IP address of the listener AP") #default="129.114.108.91"
     return p.parse_args()
 
 args = parse_args()
@@ -52,6 +54,7 @@ class Hosts:
 class Config:
     # test params
     verbose: bool
+    sleep: int
     baseline: bool
     run_num: int
     parallels: Sequence[int]
@@ -63,7 +66,9 @@ class Config:
     localhost: str
     hosts: Hosts
     listener_ip: str
-    base_port: int
+    listener_ap_ip: str
+    ap_port: int
+    ep_port: int
 
     # envs / paths
     report_dir: str
@@ -72,6 +77,7 @@ class Config:
 
 TEST = Config(
     verbose=args.verbose,
+    sleep=10,
     baseline=args.baseline,
     run_num=args.run,
     parallels=args.parallel,
@@ -79,16 +85,18 @@ TEST = Config(
     app=args.app,   #"iperf",
     blocks=args.blocks,
     localhost="localhost",
-    # hosts=Hosts(
-    #     ap={"initiator": "chi-c2cs", "listener": "chi-p2cs"},
-    #     ep={"initiator": "chi-cons", "listener": "chi-prod"},
-    # ),
     hosts=Hosts(
-        ap={"initiator": "chi-c2cs-tf", "listener": "chi-p2cs"},
-        ep={"initiator": "chi-cons-tf", "listener": "chi-prod"},
+        ap={"initiator": "chi-cons-ap", "listener": "chi-prod-ap"},
+        ep={"initiator": "chi-cons-ep", "listener": "chi-prod-ep"},
     ),
-    listener_ip="10.140.82.103",
-    base_port=50000,
+    # hosts=Hosts(
+    #     ap={"initiator": "fab-c2cs", "listener": "fab-p2cs"},
+    #     ep={"initiator": "fab-cons", "listener": "fab-prod"},
+    # ),
+    listener_ip=args.listen,
+    listener_ap_ip=args.listenap,
+    ap_port=49999,
+    ep_port=50000,
     report_dir=args.output, #"/tmp",
     remote_env="/home/cc/streams-cli/bin/activate",
     local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser())
