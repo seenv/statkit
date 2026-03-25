@@ -1,23 +1,16 @@
 from __future__ import annotations
 
 import logging
-#import os
 import time
 
-import shlex
-import subprocess
-from typing import Optional
+from config import Config
 
-from config import Config, Role
-
-from utils import popen_subprocess, run_subprocess, blk_config
 from utils import restart_gridftp, get_stream_id, start_tunnel
-from utils import stop_tunnel, delete_tunnel, record_ping
+from utils import stop_tunnel, delete_tunnel, record_ping, blk_config
 from utils import init_listener_env, init_initiator_env
 from utils import start_statkit, stop_statkit, cleanup_iperf
 from utils import start_iperf_server, start_iperf_client
 from utils import base_start_iperf_server, base_start_iperf_client
-#from baseline import baseline_main
 
 
 def iperf_main(cfg: Config) -> None:
@@ -28,24 +21,19 @@ def iperf_main(cfg: Config) -> None:
         for parallel in cfg.parallels
         for run in range(1, cfg.run_num + 1)
     )
-
+    tmp = None
     total_runs = len(cfg.time_frames) * len(cfg.parallels) * cfg.run_num * len(cfg.blocks)
     for idx, (block, duration, parallel, run) in enumerate(test_config, start=1):
         logging.info(
             "--------------- Test %d / %d : blocksize %s / duration: %s / parallel %s / run %s ---------------",
-            idx, total_runs, block, duration, parallel, run
-        )
-        
+            idx, total_runs, block, duration, parallel, run)
+
+        if block != tmp:
+            blk_config(cfg, block)
+            tmp = block
+
         tunnel_out_dir = f"{cfg.report_dir}/globus/{block}/{parallel}/{run}"
         direct_out_dir = f"{cfg.report_dir}/direct/{block}/{parallel}/{run}"
-        
-        #restart_gridftp(cfg)
-        #cleanup_iperf(cfg)
-        #time.sleep(cfg.sleep)
-        # initial safty check reseting/cleaning up
-        if run == 1:
-            blk_config(cfg, block)
-            #time.sleep(cfg.sleep)
 
         # launch the baseline test
         if cfg.baseline:
@@ -77,10 +65,6 @@ def iperf_main(cfg: Config) -> None:
                 cleanup_iperf(cfg)
         
         time.sleep(cfg.sleep)
-            
-        #restart_gridftp(cfg)
-        #cleanup_iperf(cfg)
-        #time.sleep(cfg.sleep)
 
         ids = get_stream_id(cfg)
         initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
@@ -134,4 +118,3 @@ def iperf_main(cfg: Config) -> None:
             
             # delete_tunnel(cfg, tunnel_id)
             # time.sleep(cfg.sleep)
-            # TODO: check the tunnel status and continue when it stopped
