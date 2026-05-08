@@ -86,8 +86,8 @@ TEST = Config(
     blocks=args.blocks,
     localhost="localhost",
     hosts=Hosts(
-        ap={"initiator": "initiator-ap", "listener": "listener-ap"},
-        ep={"initiator": "initiator-ep", "listener": "listener-ep"},
+        ap={"initiator": "fab-c2cs", "listener": "fab-p2cs"},
+        ep={"initiator": "fab-cons", "listener": "fab-prod"},
     ),
     # hosts=Hosts(
     #     ap={"initiator": "fab-c2cs", "listener": "fab-p2cs"},

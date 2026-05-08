@@ -33,8 +33,8 @@ def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
         host,
         None,
         (
-            f"mkdir -p {shlex.quote(dest_dir)} && "
-            f"rm -f {shlex.quote(dest_path)}"
+            f"mkdir -p {shlex.quote(dest_dir)} "#&& "
+            #f"rm -f {shlex.quote(dest_path)}"
         ),
         localhost=cfg.localhost,
     )
@@ -47,10 +47,11 @@ def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
     )
 
 
-def run_rsync_direct(
+def run_rsync(
     cfg: Config,
     src_host: str,
-    dst_ip: str,
+    #dst_ip: str,
+    dst_host: str,
     src_file: str,
     dst_file: str,
     out_dir: str,
@@ -58,16 +59,16 @@ def run_rsync_direct(
 ) -> None:
     """
     Run direct rsync from src_host to ubuntu@dst_ip:dst_file.
-    This does not use Globus Streams.
     """
 
     cmd = (
         f"mkdir -p {shlex.quote(out_dir)} && "
         f"/usr/bin/time -v -o {shlex.quote(out_dir)}/rsync_time.log "
-        f"rsync -a --info=progress2 --no-compress "
+        f"rsync -a --info=progress2 --no-compress --stats "
         f"-e {shlex.quote('ssh -T -o Compression=no -o StrictHostKeyChecking=no')} "
         f"{shlex.quote(src_file)} "
-        f"ubuntu@{shlex.quote(dst_ip)}:{shlex.quote(dst_file)} "
+        #f"ubuntu@{shlex.quote(dst_ip)}:{shlex.quote(dst_file)} "
+        f"{shlex.quote(dst_host)}:{shlex.quote(dst_file)} "
         f"2>&1 | tee {shlex.quote(out_dir)}/rsync.log"
     )
 
@@ -79,7 +80,8 @@ def run_rsync_direct(
         timeout=timeout,
     )
 
-    logging.info("RSYNC: Completed direct rsync from %s to %s", src_host.upper(), dst_ip)
+    #logging.info("RSYNC: Completed direct rsync from %s to %s", src_host.upper(), dst_ip)
+    logging.info("RSYNC: Completed direct rsync from %s to %s", src_host.upper(), dst_host)
     logging.debug("RSYNC stdout:\n%s", cp.stdout)
 
 
@@ -96,9 +98,10 @@ def rsync_main(cfg: Config) -> None:
     No Globus Streams tunnel is created.
     """
 
-    src_host = cfg.hosts.ep["initiator"]
-    dst_host = cfg.hosts.ep["listener"]
-    dst_ip = cfg.listener_ip
+    src_host = cfg.hosts.ep["listener"]
+    dst_host = cfg.hosts.ep["initiator"]
+    #dst_ip = cfg.listener_ip
+    dst_ip = "192.168.20.10"
 
     src_file = "/tmp/rsync-test/1G.bin"
     dst_file = "/tmp/rsync-test/1G.bin"
@@ -124,8 +127,7 @@ def rsync_main(cfg: Config) -> None:
             run,
         )
 
-        out_dir = f"{cfg.report_dir}/rsync_direct/{block}/{parallel}/{run}"
-
+        out_dir = f"{cfg.report_dir}/rsync-test/{block}/{parallel}/{run}"
         try:
             ensure_remote_file(cfg, src_host, src_file)
             prepare_remote_dest(cfg, dst_host, dst_file)
@@ -135,10 +137,11 @@ def rsync_main(cfg: Config) -> None:
             time.sleep(cfg.sleep)
 
             logging.info("RSYNC: Starting direct rsync transfer")
-            run_rsync_direct(
+            run_rsync(
                 cfg=cfg,
                 src_host=src_host,
-                dst_ip=dst_ip,
+                #dst_ip=dst_ip,
+                dst_host=dst_host,
                 src_file=src_file,
                 dst_file=dst_file,
                 out_dir=out_dir,
