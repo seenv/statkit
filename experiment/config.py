@@ -35,7 +35,7 @@ def parse_args():
     p.add_argument("--run", "-r", type=int, default=1, help="Total tests per each config")
     p.add_argument("--parallel", "-P", type=_parse_int_list, default= [1], help="Parallel streams value")
     p.add_argument("--time", "-t", type=_parse_int_list, default=[5], help="Duration of each stream (sec)")
-    p.add_argument("--app", "-a", type=str, default="iperf", help="Application (iperf | )")
+    p.add_argument("--app", "-a", type=str, default="rsync", help="Application (iperf | rsync)")
     p.add_argument("--blocks", "-b", type=_parse_int_list, default=[32], help="Gridftp blocksize")
     p.add_argument("--output", "-o", type=str, default="/tmp", help="Log file's base path (remote)")
     p.add_argument("--listen", "-ip",  type=str,required=True, help="The IP address of the listener") # default="10.52.2.167"
@@ -86,8 +86,8 @@ TEST = Config(
     blocks=args.blocks,
     localhost="localhost",
     hosts=Hosts(
-        ap={"initiator": "chi-cons-ap", "listener": "chi-prod-ap"},
-        ep={"initiator": "chi-cons-ep", "listener": "chi-prod-ep"},
+        ap={"initiator": "initiator-ap", "listener": "listener-ap"},
+        ep={"initiator": "initiator-ep", "listener": "listener-ep"},
     ),
     # hosts=Hosts(
     #     ap={"initiator": "fab-c2cs", "listener": "fab-p2cs"},

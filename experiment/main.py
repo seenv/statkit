@@ -3,6 +3,7 @@ from datetime import datetime
 
 from config import TEST
 from iperf import iperf_main
+from rsync import rsync_main
 from utils import setup_logging
 
 # TODO: define a class and create ctrl to run the setup pipeline 
@@ -12,6 +13,8 @@ def main() -> None:
 
     if TEST.app == "iperf":
         iperf_main(TEST)
+    elif TEST.app == "rsync":
+        rsync_main(TEST)
 
 if __name__ == "__main__":
     main()
