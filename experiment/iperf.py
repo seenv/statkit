@@ -70,7 +70,7 @@ def iperf_main(cfg: Config) -> None:
         initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
 
         # create tunnel (local)
-        tunnel_id = start_tunnel(cfg, initiator_stream_id, listener_stream_id)
+        tunnel_id = start_tunnel(cfg, initiator_stream_id, listener_stream_id, block, parallel, run)
         time.sleep(cfg.sleep)
 
         try:
