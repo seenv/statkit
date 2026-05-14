@@ -34,7 +34,8 @@ def parse_args():
     p.add_argument("--baseline", action="store_true", default=False, help="Enable baseline tests")
     p.add_argument("--run", "-r", type=int, default=1, help="Total tests per each config")
     p.add_argument("--parallel", "-P", type=_parse_int_list, default= [1], help="Parallel streams value")
-    p.add_argument("--time", "-t", type=_parse_int_list, default=[5], help="Duration of each stream (sec)")
+    # p.add_argument("--time", "-t", type=_parse_int_list, default=[5], help="Duration of each stream (sec)")
+    p.add_argument("--size", "-n", type=_parse_int_list, default=1, help="File size to transfer")
     p.add_argument("--app", "-a", type=str, default="rsync", help="Application (iperf | rsync)")
     p.add_argument("--blocks", "-b", type=_parse_int_list, default=[32], help="Gridftp blocksize")
     p.add_argument("--output", "-o", type=str, default="/tmp", help="Log file's base path (remote)")
@@ -58,7 +59,9 @@ class Config:
     baseline: bool
     run_num: int
     parallels: Sequence[int]
-    time_frames: Sequence[int]
+    #time_frames: Sequence[int]
+    file_size: Sequence[int]
+    #file_size: int
     app: str
     blocks: Sequence[int]
 
@@ -81,7 +84,8 @@ TEST = Config(
     baseline=args.baseline,
     run_num=args.run,
     parallels=args.parallel,
-    time_frames=args.time,  #20,
+    # time_frames=args.time,  #20,
+    file_size=args.size,
     app=args.app,   #"iperf",
     blocks=args.blocks,
     localhost="localhost",
@@ -98,6 +102,6 @@ TEST = Config(
     ap_port=49999,
     ep_port=50000,
     report_dir=args.output, #"/tmp",
-    remote_env="/home/cc/streams-cli/bin/activate",
+    remote_env="/home/ubuntu/streams-cli/bin/activate",
     local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser())
 )

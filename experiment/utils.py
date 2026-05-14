@@ -19,7 +19,7 @@ from config import Config, Role
 #     short = uuid.uuid4().hex[:8]
 #     return f"{ts}-{short}"
 
-def setup_logging(verbose: bool, log_path: str = "/tmp/statkit.log") -> None:
+def setup_logging(verbose: bool, log_path: str = "/tmp/strefer.log") -> None:
     root = logging.getLogger()
     # removing existing handlers to avoid duplicate logs when re running
     # root.handlers.clear()
@@ -133,6 +133,22 @@ def popen_subprocess(host: str, env: Optional[str], cmd: str, *, localhost: str)
 # TODO: add run subprocess via globus python agent
 
 
+def make_temp_file(cfg: Config, host: str, size: int, file_path: str) -> None:
+    """
+    Check that the source file exists on the sender.
+    """
+    cp = run_subprocess(
+        host,
+        None,
+        f"mkdir -p /tmp/{cfg.app}/ && "
+        f"fallocate -l {size}G {shlex.quote(file_path)} && "
+        f"test -f {shlex.quote(file_path)} && "
+        f"ls -lh {shlex.quote(file_path)} && "
+        f"du -h {shlex.quote(file_path)}",
+        localhost=cfg.localhost,
+    )
+    logging.info(f"{cfg.app.upper()}: Source file on %s:\n%s", host.upper(), cp.stdout.strip())
+
 
 # Helpers:
 _UUID_CANDIDATE = re.compile(r"[0-9a-fA-F-]{32,36}")
@@ -235,7 +251,9 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         #out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr)
-        out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, "AP")
+        #out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, "AP")
+        gateway_name = role.capitalize()
+        out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, gateway_name)
         logging.debug("IPERF: Stream Gateway id on %s %s", host.upper(), cp.stdout.strip())
     missing = {"initiator", "listener"} - set(out.keys())
     if missing:
@@ -243,12 +261,13 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
     return out
 
 
-def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, blk: int, parallel: int, run: int, check: bool = True) -> str:
+#def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, blk: int, parallel: int, run: int, check: bool = True) -> str:
+def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, blk: int, size: int, run: int, check: bool = True) -> str:
     cp = run_subprocess(
         cfg.localhost, cfg.local_env,
         "globus streams tunnel create "
-        "--lifetime-minutes 360 -v "
-        f"--label CHI-B{blk}-P{parallel}-R{run} "
+        "--lifetime-minutes 3120 -v "
+        f"--label FAB-B{blk}-S{size}-R{run} "
         f"{shlex.quote(initiator_id)} {shlex.quote(listener_id)}",
         localhost=cfg.localhost,
     )
@@ -262,7 +281,8 @@ def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, blk: int, par
     return id
 
 
-def start_statkit(cfg: Config, t : int, parallel: int, run_idx: int, out_dir: str, check: bool = True) -> None:
+#def start_statkit(cfg: Config, t : int, parallel: int, run_idx: int, out_dir: str, check: bool = True) -> None:
+def start_statkit(cfg: Config, t : int , app: str, out_dir: str, check: bool = True) -> None:
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
         cp = popen_subprocess(
@@ -273,7 +293,7 @@ def start_statkit(cfg: Config, t : int, parallel: int, run_idx: int, out_dir: st
             #"pids=$(pgrep -d, -f globus-gridftp-server|iperf || true); "
             "pids=$(pgrep -d, -f globus-gridftp-server || true); "
             "python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
-            f"--out {shlex.quote(out_dir)} --duration {t * 120} & "
+            f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} --duration {t * 120} & "
             f"echo $! > {shlex.quote(out_dir)}/launcher.pid ", 
             localhost=cfg.localhost,
         )
@@ -373,70 +393,83 @@ def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
     else:
         raise RuntimeError(f"LOCAL: Tunnel was not deleted: {tunnel_id}\n")
 
-def start_iperf_server(cfg: Config, host: str, port:int, tunnel_id: str, out_dir: str) -> subprocess.Popen[str]:
+
+def start_iperf_server(cfg: Config, host: str, port:int, tunnel_id: str, temp_file: str, app: str, out_dir: str) -> subprocess.Popen[str]:
     #host = cfg.hosts.ep.get("listener")
-    cp = popen_subprocess(
     #cp = run_subprocess(
+    cp = popen_subprocess(
         host, cfg.remote_env,
         "globus-streams-launch "
         f"-p {port} {shlex.quote(tunnel_id)} "
         f"iperf3 -s -p {port} -1 --timestamps "
-        f"-J --logfile {out_dir}/iperf.json --forceflush & "
+        f"-F {temp_file} "
+        f"-J --logfile {out_dir}/{shlex.quote(app)}.json  --forceflush & "
         "echo $! " ,
         localhost=cfg.localhost,
     )
     logging.info("IPERF: Started iperf3 server on host %s", host.upper())
 
-def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+
+#def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, size: int, temp_file: str, app: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+
     #host = cfg.hosts.ep.get("initiator")
     cp = run_subprocess(
         host, cfg.remote_env,
         "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
-        f"-J --logfile {shlex.quote(out_dir)}/iperf.json --forceflush "
-        f"-P {parallel} -i 10 -O 10 -Z -R -t {t} --timestamps ",
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json  --forceflush "
+        #f"-P {parallel} -i 10 -O 10 -Z -R -t {t} --timestamps ",
+        f"-Z -R -n {size} -F {temp_file} --timestamps ",
         localhost=cfg.localhost,
-        timeout= t * 120,
+        timeout= size * 120,
     )
-    n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
+    #n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
+    n = 1 * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
     tail = "\n".join(cp.stdout.splitlines()[-n:])
     logging.info("IPERF: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
     return cp
 
-def base_start_iperf_server(cfg: Config, host: str, port: int, out_dir: str) -> subprocess.Popen[str]:
+
+#def base_start_iperf_server(cfg: Config, host: str, port: int, out_dir: str) -> subprocess.Popen[str]:
+def base_start_iperf_server(cfg: Config, host: str, port: int, temp_file: str, app: str, out_dir: str) -> subprocess.Popen[str]:
     #host = cfg.hosts.ep.get("listener")
     cp = popen_subprocess(
         host, None,
         f"iperf3 -s -p {port} -1 --timestamps "
-        f"-J --logfile {shlex.quote(out_dir)}/iperf.json --forceflush & "
+        f"-F {temp_file} "
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json  --forceflush & "
         "echo $! " ,
         localhost=cfg.localhost,
     )
-    logging.info("BASELINE: Started iperf3 server on %s", host.upper())
+    logging.info("BASE: Started iperf3 server on %s", host.upper())
 
-def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+#def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int, size: int, temp_file: str, app: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     cp = run_subprocess(
         host, cfg.remote_env,
         f"iperf3 -c {listener_ip} -p {port} "
-        f"-J --logfile {shlex.quote(out_dir)}/iperf.json --forceflush "
-        f"-P {parallel} -i 10 -O 10 -Z -R -t {t} --timestamps ",
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json --forceflush "
+        #f"-P {parallel} -i 10 -O 10 -Z -R -t {t} --timestamps ",
+        f"-Z -R -n {size} -F {temp_file} --timestamps ",
         localhost=cfg.localhost,
-        timeout= t * 120,
+        timeout= size * 120,
     )
-    n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
+    #n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
+    n = 1 * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
     tail = "\n".join(cp.stdout.splitlines()[-n:])
-    logging.info("BASELINE: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
+    logging.info("BASE: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
     return cp
 
-def record_ping(cfg: Config, host: str, dest_ip: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def record_ping(cfg: Config, host: str, dest_ip: str, app: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     cp = run_subprocess(
         host, None,
         #f"netserver   # on listener side "
         #f"netperf -H <listener_ip> -t TCP_RR -l 30   # from initiator side"
         #f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} > {shlex.quote(out_dir)}/ping.log ",
         #f"ping -4 -n -D -i 0.5 -c 20 {dest_ip} > {shlex.quote(out_dir)}/ping.log ",
-        f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} | tee {shlex.quote(out_dir)}/ping.log ",
+        f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} | tee {shlex.quote(out_dir)}/{app}-ping.log ",
         localhost=cfg.localhost,
     )
     logging.debug("%s: Ping log %s", host.upper(), cp.stdout)

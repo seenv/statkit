@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+import time
 
 from config import TEST
 from iperf import iperf_main
@@ -15,6 +16,10 @@ def main() -> None:
         iperf_main(TEST)
     elif TEST.app == "rsync":
         rsync_main(TEST)
+    elif TEST.app == "both":
+        rsync_main(TEST)
+        time.sleep(10)
+        iperf_main(TEST)
 
 if __name__ == "__main__":
     main()
