@@ -30,8 +30,8 @@ def iperf_main(cfg: Config) -> None:
     #for idx, (block, duration, parallel, run) in enumerate(test_config, start=1):
     for idx, (block, size, run) in enumerate(test_config, start=1):
         logging.info(
-            #"--------------- Test %d / %d : blocksize %s / duration: %s / parallel %s / run %s ---------------",
-            "--------------- RSYNC DIRECT Test %d / %d : blocksize %s / size %sG / run %s ---------------",
+            #"--------------- iPerf Tests: %d / %d : blocksize %s / duration: %s / parallel %s / run %s ---------------",
+            "--------------- iPerf Tests: %d / %d : blocksize %s / size %sG / run %s ---------------",
             idx, total_runs, block,
             #duration, #parallel,
             size, run)

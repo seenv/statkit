@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, List, Dict, Tuple
 #from os.path import expanduser
+from pathlib import PurePosixPath
 
 from config import Config, Role
 
@@ -132,25 +133,33 @@ def popen_subprocess(host: str, env: Optional[str], cmd: str, *, localhost: str)
 
 # TODO: add run subprocess via globus python agent
 
+# Helpers:
+#def make_temp_file(cfg: Config, host: str, size: int, file_path: str) -> None:
+def make_temp_file(cfg: Config, size: int, file_path: str) -> None:
+    for host in cfg.hosts.ep.values():
+        cp = run_subprocess(
+            host,
+            None,
+            f"mkdir -p /tmp/temp_file/ && "
+            f"fallocate -l {size}G {shlex.quote(file_path)} && "
+            f"test -f {shlex.quote(file_path)} && "
+            #f"ls -lh {shlex.quote(file_path)} && "
+            f"du -h {shlex.quote(file_path)}",
+            localhost=cfg.localhost,
+        )
+        logging.info(f"{cfg.app.upper()}: Source file on %s: %s", host.upper(), cp.stdout.strip())
 
-def make_temp_file(cfg: Config, host: str, size: int, file_path: str) -> None:
-    """
-    Check that the source file exists on the sender.
-    """
-    cp = run_subprocess(
-        host,
-        None,
-        f"mkdir -p /tmp/{cfg.app}/ && "
-        f"fallocate -l {size}G {shlex.quote(file_path)} && "
-        f"test -f {shlex.quote(file_path)} && "
-        f"ls -lh {shlex.quote(file_path)} && "
-        f"du -h {shlex.quote(file_path)}",
+
+def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
+    dest_dir = str(PurePosixPath(dest_path).parent)
+
+    run_subprocess(
+        host, None,
+        f"mkdir -p {shlex.quote(dest_dir)} ", #&& ",
         localhost=cfg.localhost,
     )
-    logging.info(f"{cfg.app.upper()}: Source file on %s:\n%s", host.upper(), cp.stdout.strip())
+    logging.info("RSYNC: Prepared destination on %s: temp_file=%s", host.upper(), dest_path)
 
-
-# Helpers:
 _UUID_CANDIDATE = re.compile(r"[0-9a-fA-F-]{32,36}")
 def _parse_uid(output: str) -> str:
     for m in _UUID_CANDIDATE.finditer(output):
@@ -199,6 +208,8 @@ def blk_config(cfg: Config, blk: int, check: bool = True) -> None:
         cp = run_subprocess(
             host, None,
             f"sudo sed -i -E 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' /etc/gridftp.d/zdebug; "
+            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|$AWAI_SPLICE_ROUTING {splice}|' "
+            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}|' "
             f"cat /etc/gridftp.d/zdebug ",
             localhost=cfg.localhost
         )
@@ -377,7 +388,7 @@ def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
         check=False,
     )
     state, status = status_tunnel(cfg, tunnel_id)
-    logging.info("LOCAL: Stop stream tunnel %s: %s \n\n", tunnel_id, state)
+    logging.info("LOCAL: Stop stream tunnel %s: %s ", tunnel_id, state)
 
 
 def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
@@ -395,8 +406,6 @@ def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
 
 
 def start_iperf_server(cfg: Config, host: str, port:int, tunnel_id: str, temp_file: str, app: str, out_dir: str) -> subprocess.Popen[str]:
-    #host = cfg.hosts.ep.get("listener")
-    #cp = run_subprocess(
     cp = popen_subprocess(
         host, cfg.remote_env,
         "globus-streams-launch "
@@ -412,8 +421,6 @@ def start_iperf_server(cfg: Config, host: str, port:int, tunnel_id: str, temp_fi
 
 #def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, size: int, temp_file: str, app: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-
-    #host = cfg.hosts.ep.get("initiator")
     cp = run_subprocess(
         host, cfg.remote_env,
         "globus-streams-launch "
@@ -421,7 +428,7 @@ def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
         f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json  --forceflush "
         #f"-P {parallel} -i 10 -O 10 -Z -R -t {t} --timestamps ",
-        f"-Z -R -n {size} -F {temp_file} --timestamps ",
+        f"-Z -R -n {size}G -F {temp_file} --timestamps ",
         localhost=cfg.localhost,
         timeout= size * 120,
     )
@@ -434,7 +441,6 @@ def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int
 
 #def base_start_iperf_server(cfg: Config, host: str, port: int, out_dir: str) -> subprocess.Popen[str]:
 def base_start_iperf_server(cfg: Config, host: str, port: int, temp_file: str, app: str, out_dir: str) -> subprocess.Popen[str]:
-    #host = cfg.hosts.ep.get("listener")
     cp = popen_subprocess(
         host, None,
         f"iperf3 -s -p {port} -1 --timestamps "
@@ -444,6 +450,7 @@ def base_start_iperf_server(cfg: Config, host: str, port: int, temp_file: str, a
         localhost=cfg.localhost,
     )
     logging.info("BASE: Started iperf3 server on %s", host.upper())
+
 
 #def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int, size: int, temp_file: str, app: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -461,6 +468,34 @@ def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int,
     tail = "\n".join(cp.stdout.splitlines()[-n:])
     logging.info("BASE: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
     return cp
+
+
+def start_rsync(cfg: Config, src_host: str, dst_host: str, temp_file: str, out_dir: str, timeout: int) -> None:
+    cmd = (
+        f"mkdir -p {shlex.quote(out_dir)} && "
+        #f"/usr/bin/time -f 'elapsed_seconds=%e\\nuser_seconds=%U\\nsys_seconds=%S\\ncpu_percent=%P' "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync_time.log "
+        f"rsync -avvv --info=progress2,stats2 --no-compress "
+        f"--mkpath --no-checksum --whole-file --ignore-times "
+        f"-e {shlex.quote('ssh -T -o Compression=no -o StrictHostKeyChecking=no')} "
+        f"{shlex.quote(temp_file)} {shlex.quote(dst_host)}:{shlex.quote(temp_file)} "
+        f"--log-file={shlex.quote(out_dir)}/rsync_log.log "
+        f"2>&1 | tr '\\r' '\\n' | "
+        #f"stdbuf -oL awk 'NF {{ print strftime(\"%Y-%m-%d %H:%M:%S\"), strftime(\"%s\"), $0; fflush(); }}' "
+        f"stdbuf -oL awk 'NF {{ print strftime(\"%Y-%m-%d %H:%M:%S\"), $0; fflush(); }}' "
+        f"| tee {shlex.quote(out_dir)}/rsync.log"
+    )
+
+    cp = run_subprocess(
+        src_host,
+        None,
+        cmd,
+        localhost=cfg.localhost,
+        timeout=timeout
+    )
+    logging.info("RSYNC: Completed direct rsync from %s to %s", src_host.upper(), dst_host)
+    logging.debug("RSYNC stdout:\n%s", cp.stdout)
+
 
 def record_ping(cfg: Config, host: str, dest_ip: str, app: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     cp = run_subprocess(
