@@ -170,19 +170,20 @@ def _parse_uid(output: str) -> str:
     raise RuntimeError(f"Could not find UUID in output:\n{output}")
 
 #def _parse_gateway_id_by_name(output: str, name: str, *, exact: bool = False) -> str:
-def _parse_gateway_uid(output: str, name: str, *, exact: bool = False) -> str:
-    want = name.strip()
+def _parse_gateway_uid(output: str,  parts: list[str], *, exact: bool = False) -> str:
+    #want = name.strip()
     for line in output.splitlines():
         if "|" not in line:
             continue
         if line.strip().startswith("---"):
             continue
-
         # first column is Display Name
         display = line.split("|", 1)[0].strip()
 
-        match = (display == want) if exact else (want in display)
-        if not match:
+        # match = (display == want) if exact else (want in display)
+        # if not match:
+        #     continue
+        if not all(part in display for part in parts):
             continue
 
         m = _UUID_CANDIDATE.search(line)
@@ -190,7 +191,7 @@ def _parse_gateway_uid(output: str, name: str, *, exact: bool = False) -> str:
             raise RuntimeError(f"Matched name but no UUID found on line:\n{line}")
         return str(uuid.UUID(m.group(0)))
 
-    raise RuntimeError(f"No gateway row matched name={name!r}.\nOutput:\n{output}")
+    raise RuntimeError(f"No gateway row matched name={parts!r}.\nOutput:\n{output}")
 
 
 def _parse_contact_port(output: str) -> int:
@@ -203,23 +204,41 @@ def _parse_contact_port(output: str) -> int:
     return int(m.group("port"))
 
 
-def blk_config(cfg: Config, blk: int, check: bool = True) -> None:
+def gridftp_config(cfg: Config, blk: int, awai:int, check: bool = True) -> None:
     for host in cfg.hosts.ap.values():
         cp = run_subprocess(
             host, None,
-            f"sudo sed -i -E 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' /etc/gridftp.d/zdebug; "
-            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|$AWAI_SPLICE_ROUTING {splice}|' "
+            f"sudo sed -i -E "
+            f"-e 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|$AWAI_SPLICE_ROUTING {awai}|' "
             #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}|' "
+            f"/etc/gridftp.d/zdebug; "
             f"cat /etc/gridftp.d/zdebug ",
             localhost=cfg.localhost
         )
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"IPERF: Failed changing the blocksize on {host.upper()}"
+                f"GFTP: Failed changing the blocksize on {host.upper()}"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         head = "\n".join(cp.stdout.splitlines()[:5])
-        logging.debug("IPERF: Gridftp blocksize config on %s:\n%s", host.upper(), head)
+        logging.debug("GFTP: Gridftp splice and blocksize config on %s:\n%s", host.upper(), head)
+
+
+def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
+    for host in cfg.hosts.ap.values():
+        cp = run_subprocess(
+            host, None,
+            f"mkdir -p {shlex.quote(out_dir)} && "
+            f"sudo cat /etc/gridftp.d/zdebug > {shlex.quote(out_dir)}/gridftp.log ",
+            localhost=cfg.localhost
+        )
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"GFTP: Failed changing the gridftp configuration on {host.upper()}"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+        logging.debug("GFTP: Recorded the Gridftp configuration on %s", host.upper())
 
 
 def restart_gridftp(cfg: Config, check: bool = True) -> None:
@@ -243,7 +262,11 @@ def cleanup_iperf(cfg: Config, check: bool = True) -> None:
     for host in hosts:
     # for host in cfg.hosts.ep.values():
     # host = cfg.hosts.ep.get("listener")
-        cp = run_subprocess(host, None,"pkill -TERM -f '[i]perf3' || true ", localhost=cfg.localhost)
+        cp = run_subprocess(
+            host, None,
+            "pkill -TERM -f '[i]perf3' || true ", 
+            localhost=cfg.localhost
+        )
         if check and cp.returncode != 0:
             raise RuntimeError(
                 f"IPERF: Failed killing iperf on {host.upper()}\n "
@@ -263,8 +286,9 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
             )
         #out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr)
         #out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, "AP")
-        gateway_name = role.capitalize()
-        out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, gateway_name)
+        #gateway_name = role.capitalize()
+        #out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, gateway_name)
+        out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, [cfg.lease, role.capitalize()], exact=False)
         logging.debug("IPERF: Stream Gateway id on %s %s", host.upper(), cp.stdout.strip())
     missing = {"initiator", "listener"} - set(out.keys())
     if missing:
@@ -278,7 +302,7 @@ def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, blk: int, siz
         cfg.localhost, cfg.local_env,
         "globus streams tunnel create "
         "--lifetime-minutes 3120 -v "
-        f"--label FAB-B{blk}-S{size}-R{run} "
+        f"--label {cfg.lease.replace(" ", "_")}-B{blk}-S{size}-R{run} "
         f"{shlex.quote(initiator_id)} {shlex.quote(listener_id)}",
         localhost=cfg.localhost,
     )
@@ -305,7 +329,7 @@ def start_statkit(cfg: Config, t : int , app: str, out_dir: str, check: bool = T
             "pids=$(pgrep -d, -f globus-gridftp-server || true); "
             "python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
             f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} --duration {t * 120} & "
-            f"echo $! > {shlex.quote(out_dir)}/launcher.pid ", 
+            f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ", 
             localhost=cfg.localhost,
         )
         logging.debug("IPERF: Started on statkit on %s %s", host.upper(), cp.stdout)
@@ -316,7 +340,8 @@ def init_listener_env(cfg: Config, tunnel_id: str, check: bool = True) -> None:
     cp = run_subprocess(
         host, cfg.remote_env,
         "globus-streams environment initialize "
-        f"--listener-contact-string {cfg.listener_ip}:{cfg.ep_port} "
+        #f"--listener-contact-string {cfg.listener_ip}:{cfg.ep_port} "
+        f"--listener-contact-string {cfg.listener_ip}:{cfg.tunnel_port} "
         f"{shlex.quote(tunnel_id)}",
         localhost=cfg.localhost,
     )
@@ -423,6 +448,7 @@ def start_iperf_server(cfg: Config, host: str, port:int, tunnel_id: str, temp_fi
 def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, size: int, temp_file: str, app: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     cp = run_subprocess(
         host, cfg.remote_env,
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/iperf_time.log "
         "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
@@ -504,7 +530,7 @@ def record_ping(cfg: Config, host: str, dest_ip: str, app: str, out_dir: str, ch
         #f"netperf -H <listener_ip> -t TCP_RR -l 30   # from initiator side"
         #f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} > {shlex.quote(out_dir)}/ping.log ",
         #f"ping -4 -n -D -i 0.5 -c 20 {dest_ip} > {shlex.quote(out_dir)}/ping.log ",
-        f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} | tee {shlex.quote(out_dir)}/{app}-ping.log ",
+        f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} | tee {shlex.quote(out_dir)}/{shlex.quote(app)}-ping.log ",
         localhost=cfg.localhost,
     )
     logging.debug("%s: Ping log %s", host.upper(), cp.stdout)

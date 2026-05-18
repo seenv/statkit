@@ -31,13 +31,18 @@ def _parse_int_list(s: str) -> list[int]:
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--verbose", "-v", action="store_true", default=False)
+    p.add_argument("--lease", type=str, required=True, help="Lease name on the testbed")
     p.add_argument("--baseline", action="store_true", default=False, help="Enable baseline tests")
+    p.add_argument("--splice", type=_parse_int_list, default= [1], help="Enabling splice splice (0: disable | 1: enable | 2: test both)")
     p.add_argument("--run", "-r", type=int, default=1, help="Total tests per each config")
     p.add_argument("--parallel", "-P", type=_parse_int_list, default= [1], help="Parallel streams value")
     # p.add_argument("--time", "-t", type=_parse_int_list, default=[5], help="Duration of each stream (sec)")
-    p.add_argument("--size", "-n", type=_parse_int_list, default=1, help="File size to transfer")
+    p.add_argument("--size", "-n", type=_parse_int_list, default=[1], help="File size to transfer")
     p.add_argument("--app", "-a", type=str, default="rsync", help="Application (iperf | rsync)")
     p.add_argument("--blocks", "-b", type=_parse_int_list, default=[32], help="Gridftp blocksize")
+    p.add_argument("--directport", type=int, default=49999, help="The default port for iperf3 baseline")
+    p.add_argument("--tunnelport", type=int, default=50000, help="The default port for iperf3 through the tunnel")
+    #p.add_argument("--port", type=int, default=49998, help="The default port")
     p.add_argument("--output", "-o", type=str, default="/tmp", help="Log file's base path (remote)")
     p.add_argument("--listen", "-ip",  type=str,required=True, help="The IP address of the listener") # default="10.52.2.167"
     p.add_argument("--listenap", type=str, required=True, help="The IP address of the listener AP") #default="129.114.108.91"
@@ -55,8 +60,10 @@ class Hosts:
 class Config:
     # test params
     verbose: bool
+    lease: str
     sleep: int
     baseline: bool
+    splice: Sequence[int]
     run_num: int
     parallels: Sequence[int]
     #time_frames: Sequence[int]
@@ -70,8 +77,9 @@ class Config:
     hosts: Hosts
     listener_ip: str
     listener_ap_ip: str
-    ap_port: int
-    ep_port: int
+    direct_port: int
+    tunnel_port: int
+    #port: int
 
     # envs / paths
     report_dir: str
@@ -80,8 +88,11 @@ class Config:
 
 TEST = Config(
     verbose=args.verbose,
+    lease=args.lease,
     sleep=10,
     baseline=args.baseline,
+    #splice=[0, 1] if args.splice == 2 else [args.splice], #args.splice,
+    splice=args.splice,
     run_num=args.run,
     parallels=args.parallel,
     # time_frames=args.time,  #20,
@@ -99,8 +110,9 @@ TEST = Config(
     # ),
     listener_ip=args.listen,
     listener_ap_ip=args.listenap,
-    ap_port=49999,
-    ep_port=50000,
+    direct_port=args.directport,#49999,
+    tunnel_port=args.tunnelport, #50000,
+    #port=args.rsyncport, #49998,
     report_dir=args.output, #"/tmp",
     remote_env="/home/ubuntu/streams-cli/bin/activate",
     local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser())
