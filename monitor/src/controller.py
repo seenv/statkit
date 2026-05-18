@@ -80,6 +80,7 @@ class ControllerConfig:
     net_backend: str = "psutil"
     nic_include_regex: Optional[str] = None
     nic_exclude_regex: Optional[str] = r"^(lo|docker\d+|br-|veth|virbr|cni\d+|flannel\.)"
+    app: str = "app"
 
 
 class Controller:
@@ -92,6 +93,9 @@ class Controller:
     def start(self) -> None:
         out = Path(self.cfg.out_dir)
         out.mkdir(parents=True, exist_ok=True)
+        
+        app = self.cfg.app.strip()
+        prefix = f"{app}-" if app else ""
 
         try:
             if os.path.exists(self.stop_flag_path):
@@ -102,24 +106,24 @@ class Controller:
         self.procs = [
             Process(
                 target=_run_cpu,
-                kwargs={"out_path": str(out / "cpu.csv"), "out_thread_path": str(out / "cpu_thread.csv"), 
+                kwargs={"out_path": str(out / f"{prefix}cpu.csv"), "out_thread_path": str(out / f"{prefix}cpu_thread.csv"), 
                         "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "stop": self.stop},
                 daemon=True
             ),
             Process(
                 target=_run_mem,
-                kwargs={"out_path": str(out / "mem.csv"), "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "stop": self.stop},
+                kwargs={"out_path": str(out / f"{prefix}mem.csv"), "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "stop": self.stop},
                 daemon=True
             ),
             Process(
                 target=_run_disk,
-                kwargs={"out_path": str(out / "disk.csv"), "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, 
+                kwargs={"out_path": str(out / f"{prefix}disk.csv"), "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, 
                         "disk_path": self.cfg.disk_path_for_usage, "stop": self.stop},
                 daemon=True
             ),
             Process(
                 target=_run_net,
-                kwargs={"out_path": str(out / "net.csv"), "interval_s": self.cfg.interval_s, "backend": self.cfg.net_backend,
+                kwargs={"out_path": str(out / f"{prefix}net.csv"), "interval_s": self.cfg.interval_s, "backend": self.cfg.net_backend,
                     "nic_include": self.cfg.nic_include_regex, "nic_exclude": self.cfg.nic_exclude_regex, "stop": self.stop, 
                     "stop_flag_path": self.stop_flag_path},
                 daemon=True,
@@ -157,7 +161,7 @@ class Controller:
 
 def _parse_args(argv: Sequence[str]) -> ControllerConfig:
     ap = argparse.ArgumentParser(description="Concurrent resource monitor (CPU/Mem/Disk/Net) writing separate CSVs.")
-    ap.add_argument("--out", required=True, default="./mon", help="Output directory (./mon)")
+    ap.add_argument("--out", default="./mon", help="Output directory (./mon)")
     ap.add_argument("--interval", type=float, default=1.0, help="Sampling interval seconds (default: 1.0)")
     ap.add_argument("--duration", type=float, default=None, help="Duration in seconds (default: run until Ctrl-C)")
     ap.add_argument("--pids", type=str, default=None, help="Comma separated PIDs for per-process aggregates")
@@ -167,6 +171,7 @@ def _parse_args(argv: Sequence[str]) -> ControllerConfig:
     ap.add_argument("--nic-include", type=str, default=None, help="Regex to include NICs (optional)")
     ap.add_argument("--nic-exclude", type=str, default=r"^(lo|docker\d+|br-|veth|virbr|cni\d+|flannel\.)",
                     help="Regex to exclude NICs (default filters virtual/loopback)")
+    ap.add_argument("--app", type=str, default="app", help="The application that will be monitored")
     args = ap.parse_args(list(argv))
 
     pids = None
@@ -186,6 +191,7 @@ def _parse_args(argv: Sequence[str]) -> ControllerConfig:
         net_backend=args.net_backend,
         nic_include_regex=args.nic_include,
         nic_exclude_regex=args.nic_exclude,
+        app=args.app
     )
 
 
