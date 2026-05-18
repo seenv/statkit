@@ -112,12 +112,3 @@ TEST = Config(
     remote_env="/home/ubuntu/streams-cli/bin/activate",
     local_env=str(Path("~/Projects/fabric/.fabric/bin/activate").expanduser())
 )
-
-        cache/
-        evaluate/
-        experiment/archive/
-        experiment/baseline.py
-        experiment/hub/
-        experiment/iperf.py.bkp
-        experiment/utils.py_bkp
-        reports/
