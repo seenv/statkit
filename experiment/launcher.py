@@ -95,7 +95,7 @@ def run_iperf_baseline(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         cleanup_iperf(cfg)
 
 
-def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, #size: int, 
+def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
     temp_file: str, listener_host: str, initiator_host: str, output_dir: str) -> None:
     print("\n")
     logging.info("----- Test %d / %d: starting rsync test -----", idx, total_runs)
@@ -118,7 +118,6 @@ def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, #size: in
     finally:
         logging.info("RSYNC: Stopping statkit monitoring")
         stop_statkit(cfg)
-
 
 
 def experiment_main(cfg: Config) -> None:
@@ -189,7 +188,7 @@ def experiment_main(cfg: Config) -> None:
 
         if "rsync" in cfg.app:
             run_rsync(
-                cfg, idx=idx, total_runs=total_runs, timeout=timeout, arg=arg,
+                cfg, idx=idx, total_runs=total_runs, timeout=timeout, 
                 temp_file=temp_file,
                 listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"),
                 output_dir=output_dir,

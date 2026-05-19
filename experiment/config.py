@@ -39,7 +39,6 @@ def parse_args():
     p.add_argument("--verbose", "-v", action="store_true", default=False)
     p.add_argument("--test", type=str, required=True, choices=["globus", "transfer"], help="Experimet / test to perform (globus | transfer)")
     p.add_argument("--lease", type=str, required=True, help="Lease name on the testbed")
-    p.add_argument("--baseline", action="store_true", default=False, help="Enable baseline tests")
     p.add_argument("--splice", type=_parse_int_list, default= [1], help="Enabling splice splice (0: disable | 1: enable)")
     p.add_argument("--run", "-r", type=int, default=1, help="Total tests per each config")
     p.add_argument("--parallel", "-P", type=_parse_int_list, default= [1], help="Parallel streams value")
@@ -70,7 +69,6 @@ class Config:
     test: str
     lease: str
     sleep: int
-    baseline: bool
     splice: Sequence[int]
     run_num: int
     parallels: Sequence[int]
@@ -98,7 +96,6 @@ TRANSFER = Config(
     test=args.test,
     lease=args.lease,
     sleep=10,
-    baseline=args.baseline,
     splice=args.splice,
     run_num=args.run,
     parallels=args.parallel,
@@ -108,15 +105,15 @@ TRANSFER = Config(
     blocks=args.blocks,
     localhost="localhost",
     hosts=Hosts(
-        ap={"initiator": "chi-cons-ap", "listener": "chi-prod-ap"},
-        ep={"initiator": "chi-cons-ep", "listener": "chi-prod-ep"},
+        ap={"initiator": "fab-c2cs", "listener": "fab-p2cs"},
+        ep={"initiator": "fab-cons", "listener": "fab-prod"},
     ),
     listener_ip=args.listen,
     direct_port=args.directport,#49999,
     tunnel_port=args.tunnelport, #50000,
     #port=args.rsyncport, #49998,
     report_dir=args.output, #"/tmp",
-    remote_env="/home/cc/streams-cli/bin/activate",
+    remote_env="/home/ubuntu/streams-cli/bin/activate",
     local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser())
 )
 
@@ -125,7 +122,6 @@ GLOBUS = Config(
     test=args.test,
     lease=args.lease,
     sleep=10,
-    baseline=args.baseline,
     splice=args.splice,
     run_num=args.run,
     parallels=args.parallel,
