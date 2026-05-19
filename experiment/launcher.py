@@ -14,7 +14,7 @@ from utils import base_start_iperf_server, base_start_iperf_client
 from utils import start_rsync, prepare_remote_dest
 
 
-def run_iperf_gst( cfg: Config, *, idx: int, total_runs: int, timeout: int, 
+def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
     parallel: int, arg: int, 
     temp_file: str, 
     port: int, listener_host: str, initiator_host: str, output_dir: str) -> None:
@@ -23,7 +23,7 @@ def run_iperf_gst( cfg: Config, *, idx: int, total_runs: int, timeout: int,
     ids = get_stream_id(cfg)
     initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
     #tunnel_label = f"{cfg.lease.replace(" ", "_")}-idx{idx}-ttl{total_runs}"
-    tunnel_label = f"{cfg.lease.replace(' ', '_')}-idx{idx}-ttl{total_runs}"
+    tunnel_label = f"{cfg.lease.replace(' ', '_')}-idx{idx}-tot{total_runs}"
     tunnel_id = start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label)
     time.sleep(cfg.sleep)
 
