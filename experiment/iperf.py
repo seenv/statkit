@@ -6,7 +6,7 @@ import time
 from config import Config
 
 from utils import restart_gridftp, get_stream_id, start_tunnel
-from utils import stop_tunnel, delete_tunnel, record_ping, blk_config
+from utils import stop_tunnel, delete_tunnel, record_ping, gridftp_config
 from utils import init_listener_env, init_initiator_env
 from utils import start_statkit, stop_statkit, cleanup_iperf
 from utils import start_iperf_server, start_iperf_client
@@ -29,7 +29,7 @@ def iperf_main(cfg: Config) -> None:
             idx, total_runs, block, duration, parallel, run)
 
         if block != tmp:
-            blk_config(cfg, block)
+            gridftp_config(cfg, block)
             tmp = block
 
         tunnel_out_dir = f"{cfg.report_dir}/globus/{block}/{parallel}/{run}"
@@ -43,15 +43,28 @@ def iperf_main(cfg: Config) -> None:
                 start_statkit(cfg, duration, parallel, run, direct_out_dir)
                 time.sleep(cfg.sleep)
                 
+<<<<<<< Updated upstream
                 logging.info("BASELINE: Starting iperf server")
                 base_start_iperf_server(cfg, cfg.hosts.ap.get("listener"), cfg.ap_port, direct_out_dir)
+=======
+                logging.info("BASE: Starting iperf server")
+                #base_start_iperf_server(cfg, cfg.hosts.ap.get("listener"), cfg.ap_port, direct_out_dir)
+                base_start_iperf_server(cfg, cfg.hosts.ep.get("listener"), cfg.direct_port, temp_file, "iperf_base", direct_out_dir)
+>>>>>>> Stashed changes
                 time.sleep(cfg.sleep)           # it takes more for them to initiates! TODO: find a better way
                 
                 # run iperf client
                 logging.info("BASELINE: Starting iperf client")
                 base_start_iperf_client(
+<<<<<<< Updated upstream
                     cfg, cfg.hosts.ap.get("initiator"), cfg.listener_ap_ip, 
                     cfg.ap_port, duration, parallel, direct_out_dir)
+=======
+                    #cfg, cfg.hosts.ap.get("initiator"), cfg.listener_ap_ip, 
+                    cfg, cfg.hosts.ep.get("initiator"), cfg.listener_ip,
+                    #cfg.ap_port, duration, parallel, direct_out_dir)
+                    cfg.direct_port, size, temp_file, "iperf_base", direct_out_dir)     #for port used ap to distinguish
+>>>>>>> Stashed changes
                 
                 logging.info("BASELINE: Recording the RTT")
                 record_ping(cfg, cfg.hosts.ap.get("initiator"), cfg.listener_ap_ip, direct_out_dir)
@@ -89,8 +102,13 @@ def iperf_main(cfg: Config) -> None:
             contact_port = init_initiator_env(cfg, tunnel_id)
             #time.sleep(cfg.sleep)
             
+<<<<<<< Updated upstream
             logging.info("IPERF: Starting iperf server")
             start_iperf_server(cfg, cfg.hosts.ep.get("listener"), cfg.ep_port, tunnel_id, tunnel_out_dir)
+=======
+            logging.info("GST: Starting iperf server")
+            start_iperf_server(cfg, cfg.hosts.ep.get("listener"), cfg.tunnel_port, tunnel_id, temp_file, "iperf_gst", tunnel_out_dir)
+>>>>>>> Stashed changes
             time.sleep(cfg.sleep)           # it takes more for them to initiates! TODO: find a better way
             
             # run iperf client

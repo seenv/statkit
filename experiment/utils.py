@@ -135,6 +135,36 @@ def popen_subprocess(host: str, env: Optional[str], cmd: str, *, localhost: str)
 
 
 # Helpers:
+<<<<<<< Updated upstream
+=======
+#def make_temp_file(cfg: Config, host: str, size: int, file_path: str) -> None:
+def make_temp_file(cfg: Config, size: int, file_path: str) -> None:
+    for host in cfg.hosts.ep.values():
+        cp = run_subprocess(
+            host,
+            None,
+            f"mkdir -p /tmp/temp_file/ && "
+            f"fallocate -l {size}G {shlex.quote(file_path)} && "
+            f"test -f {shlex.quote(file_path)} && "
+            #f"ls -lh {shlex.quote(file_path)} && "
+            f"du -h {shlex.quote(file_path)}",
+            localhost=cfg.localhost,
+        )
+        #logging.info(f"{cfg.app.upper()}: Source file on %s: %s", host.upper(), cp.stdout.strip())
+        logging.info("FILE: Source file on %s: %s", host.upper(), cp.stdout.strip())
+
+
+def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
+    dest_dir = str(PurePosixPath(dest_path).parent)
+
+    run_subprocess(
+        host, None,
+        f"mkdir -p {shlex.quote(dest_dir)} ", #&& ",
+        localhost=cfg.localhost,
+    )
+    logging.info("RSYNC: Prepared destination on %s: temp_file=%s", host.upper(), dest_path)
+
+>>>>>>> Stashed changes
 _UUID_CANDIDATE = re.compile(r"[0-9a-fA-F-]{32,36}")
 def _parse_uid(output: str) -> str:
     for m in _UUID_CANDIDATE.finditer(output):
@@ -195,6 +225,181 @@ def blk_config(cfg: Config, blk: int, check: bool = True) -> None:
         logging.debug("IPERF: Gridftp blocksize config on %s:\n%s", host.upper(), head)
 
 
+def _sysctl_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
+    keys = (
+        "net.ipv4.tcp_mtu_probing",
+        "net.core.optmem_max",
+        "net.ipv4.tcp_slow_start_after_idle",
+        "net.core.rmem_max",
+        "net.core.wmem_max",
+        "net.core.rmem_default",
+        "net.core.wmem_default",
+        "net.ipv4.tcp_rmem",
+        "net.ipv4.tcp_wmem",
+        "net.ipv4.tcp_congestion_control",
+        "net.core.default_qdisc",
+        "net.ipv4.tcp_no_metrics_save",
+        "net.ipv4.tcp_low_latency",
+        "net.ipv4.tcp_notsent_lowat",
+        "net.ipv4.tcp_autocorking",
+        "net.ipv4.tcp_limit_output_bytes",
+        "net.ipv4.tcp_pacing_ss_ratio",
+        "net.ipv4.tcp_pacing_ca_ratio",
+        "net.ipv4.tcp_adv_win_scale",
+        "net.ipv4.tcp_app_win",
+        "net.core.netdev_budget",
+        "net.core.netdev_budget_usecs",
+        "net.core.netdev_max_backlog",
+        "net.core.dev_weight",
+        "net.ipv4.tcp_window_scaling",
+        "net.ipv4.tcp_sack",
+        "net.ipv4.tcp_dsack",
+        "net.ipv4.tcp_timestamps",
+        "net.ipv4.tcp_ecn",
+    )
+    for host in hosts:
+        cp = run_subprocess(
+            host, None,
+            f"mkdir -p {shlex.quote(out_dir)} && "
+            f"sysctl {' '.join(keys)} > {shlex.quote(out_dir)}/sysctl.log",
+            localhost=cfg.localhost,
+        )
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"SYSCTL: Failed recording sysctl values on {str(host).upper()}\n"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+        logging.debug("SYSCTL: Recorded sysctl values on %s", str(host).upper())
+
+
+def _host_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
+    cmd = (
+        f"mkdir -p {shlex.quote(out_dir)} && "
+        f"( "
+        f"echo '### hostname'; hostname; "
+        f"echo; echo '### uname'; uname -a; "
+        f"echo; echo '### lscpu'; lscpu; "
+        f"echo; echo '### ip link'; ip link; "
+        f"echo; echo '### ip -br a'; ip -br a; "
+        f"echo; echo '### ip route'; ip route; "
+        f"echo; echo '### df -hT'; df -hT; "
+        f"echo; echo '### lsblk'; lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL; "
+        f") > {shlex.quote(f'{out_dir}/host.log')}"
+    )
+    for host in hosts:
+        cp = run_subprocess(host, None, cmd, localhost=cfg.localhost)
+        if check and cp.returncode != 0:
+            raise RuntimeError(f"HOST: Failed on {str(host).upper()}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
+
+
+def _nic_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
+    cmd = (
+        f"mkdir -p {shlex.quote(out_dir)} && "
+        f"for dev in $(ls /sys/class/net | grep -v '^lo$'); do "
+        f"( "
+        f"echo '### ip link show dev' $dev; ip link show dev $dev; "
+        f"echo; echo '### ethtool' $dev; sudo ethtool $dev; "
+        f"echo; echo '### ethtool -i' $dev; sudo ethtool -i $dev; "
+        f"echo; echo '### ethtool -g' $dev; sudo ethtool -g $dev; "
+        f"echo; echo '### ethtool -k' $dev; sudo ethtool -k $dev; "
+        f"echo; echo '### ethtool -c' $dev; sudo ethtool -c $dev; "
+        f"echo; echo '### ethtool -S' $dev; sudo ethtool -S $dev; "
+        f"echo; echo '### tc -s qdisc show dev' $dev; sudo tc -s qdisc show dev $dev; "
+        f") > {shlex.quote(out_dir)}/nic_${{dev}}.log 2>&1; "
+        f"done"
+    )
+    for host in hosts:
+        cp = run_subprocess(host, None, cmd, localhost=cfg.localhost)
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"NIC: Failed on {str(host).upper()}\n"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+        logging.debug("NIC: Recorded NIC reports on %s", str(host).upper())
+
+
+def _cpu_irq_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
+    cmd = (
+        f"mkdir -p {shlex.quote(out_dir)} && "
+        f"( "
+        f"echo '### CPU governor'; "
+        f"for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo \"$f: $(cat $f 2>/dev/null)\"; done; "
+        f"echo; echo '### CPU frequencies'; "
+        f"for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do echo \"$f: $(cat $f 2>/dev/null)\"; done; "
+        f"echo; echo '### NIC IRQs and affinity'; "
+        f"for dev in $(ls /sys/class/net | grep -v '^lo$'); do "
+        f"echo; echo '## device:' $dev; "
+        f"grep -i $dev /proc/interrupts || true; "
+        f"for irq in $(grep -i $dev /proc/interrupts | awk -F: '{{print $1}}' | tr -d ' '); do "
+        f"echo IRQ $irq; "
+        f"echo -n 'smp_affinity: '; cat /proc/irq/$irq/smp_affinity 2>/dev/null || true; "
+        f"echo -n 'smp_affinity_list: '; cat /proc/irq/$irq/smp_affinity_list 2>/dev/null || true; "
+        f"done; "
+        f"done "
+        f") > {shlex.quote(out_dir)}/cpu_irq.log 2>&1; "
+    )
+    for host in hosts:
+        cp = run_subprocess(host, None, cmd, localhost=cfg.localhost)
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"CPU/IRQ: Failed on {str(host).upper()}\n"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+        logging.debug("CPU/IRQ: Recorded CPU and IRQ report on %s", str(host).upper())
+
+
+def _rss_rps_xps_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
+    cmd = (
+        f"mkdir -p {shlex.quote(out_dir)} && "
+        f"for dev in $(ls /sys/class/net | grep -v '^lo$'); do "
+        f"( "
+        f"echo '### ethtool -l channels' $dev; sudo ethtool -l $dev || true; "
+        f"echo; echo '### ethtool -x RSS indirection' $dev; sudo ethtool -x $dev || true; "
+        f"echo; echo '### RPS/XPS sysfs' $dev; "
+        f"find /sys/class/net/$dev/queues -type f "
+        f"\\( -name rps_cpus -o -name rps_flow_cnt -o -name xps_cpus \\) "
+        f"-exec sh -c 'for f do echo \"$f: $(cat \"$f\")\"; done' sh {{}} + || true; "
+        f") > {shlex.quote(out_dir)}/rss_rps_xps_${{dev}}.log 2>&1; "
+        f"done"
+    )
+    for host in hosts:
+        cp = run_subprocess(host, None, cmd, localhost=cfg.localhost)
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"RSS/RPS/XPS: Failed on {str(host).upper()}\n"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+        logging.debug("RSS/RPS/XPS: Recorded reports on %s", str(host).upper())
+
+
+def _storage_report(cfg: Config, hosts: Sequence[str], out_dir: str, path: str = "/", check: bool = True) -> None:
+    cmd = (
+        f"mkdir -p {shlex.quote(out_dir)} && "
+        f"( "
+        f"echo '### df -hT'; df -hT; "
+        f"echo; echo '### mount'; mount; "
+        f"echo; echo '### lsblk'; lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,ROTA; "
+        f"echo; echo '### block devices scheduler'; "
+        f"for f in /sys/block/*/queue/scheduler; do echo \"$f: $(cat $f 2>/dev/null)\"; done; "
+        f"echo; echo '### filesystem for path {path}'; df -hT {shlex.quote(path)}; "
+        f") > {shlex.quote(out_dir)}/storage.log 2>&1"
+    )
+    for host in hosts:
+        cp = run_subprocess(host, None, cmd, localhost=cfg.localhost)
+        if check and cp.returncode != 0:
+            raise RuntimeError(f"STORAGE: Failed on {str(host).upper()}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
+
+
+def system_state_report(cfg: Config, out_dir: str, check: bool = True) -> None:
+    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+    _sysctl_report(cfg, hosts, out_dir, check=check)
+    _host_report(cfg, hosts, out_dir, check=check)
+    _nic_report(cfg, hosts, out_dir, check=check)
+    _cpu_irq_report(cfg, hosts, out_dir, check=check)
+    _rss_rps_xps_report(cfg, hosts, out_dir, check=check)
+    _storage_report(cfg, hosts, out_dir, path=out_dir, check=check)
+
+
 def restart_gridftp(cfg: Config, check: bool = True) -> None:
     for host in cfg.hosts.ap.values():
         cp = run_subprocess(
@@ -205,7 +410,7 @@ def restart_gridftp(cfg: Config, check: bool = True) -> None:
         )
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"IPERF: Failed restarting gridftp on {host.upper()}\n"
+                f"GFTP: Failed restarting gridftp on {host.upper()}\n"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         logging.debug("IPERF: Restarted gridftp on %s (%s)", host.upper(), cp.stdout.strip())
@@ -243,12 +448,22 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
     return out
 
 
+<<<<<<< Updated upstream
 def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, blk: int, parallel: int, run: int, check: bool = True) -> str:
     cp = run_subprocess(
         cfg.localhost, cfg.local_env,
         "globus streams tunnel create "
         "--lifetime-minutes 360 -v "
         f"--label CHI-B{blk}-P{parallel}-R{run} "
+=======
+#def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, blk: int, parallel: int, run: int, check: bool = True) -> str:
+def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, lbl: str, check: bool = True) -> str:
+    cp = run_subprocess(
+        cfg.localhost, cfg.local_env,
+        "globus streams tunnel create "
+        "--lifetime-minutes 3120 -v "
+        f"--label {shlex.quote(lbl)} "
+>>>>>>> Stashed changes
         f"{shlex.quote(initiator_id)} {shlex.quote(listener_id)}",
         localhost=cfg.localhost,
     )
@@ -262,7 +477,11 @@ def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, blk: int, par
     return id
 
 
+<<<<<<< Updated upstream
 def start_statkit(cfg: Config, t : int, parallel: int, run_idx: int, out_dir: str, check: bool = True) -> None:
+=======
+def start_statkit(cfg: Config, timeout : int , app: str, out_dir: str, check: bool = True) -> None:
+>>>>>>> Stashed changes
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
         cp = popen_subprocess(
@@ -273,19 +492,28 @@ def start_statkit(cfg: Config, t : int, parallel: int, run_idx: int, out_dir: st
             #"pids=$(pgrep -d, -f globus-gridftp-server|iperf || true); "
             "pids=$(pgrep -d, -f globus-gridftp-server || true); "
             "python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
+<<<<<<< Updated upstream
             f"--out {shlex.quote(out_dir)} --duration {t * 120} & "
             f"echo $! > {shlex.quote(out_dir)}/launcher.pid ", 
+=======
+            f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} --duration {timeout} & "
+            f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ", 
+>>>>>>> Stashed changes
             localhost=cfg.localhost,
         )
         logging.debug("IPERF: Started on statkit on %s %s", host.upper(), cp.stdout)
 
 
 def init_listener_env(cfg: Config, tunnel_id: str, check: bool = True) -> None:
-    host = cfg.hosts.ep.get("listener")
+    host = cfg.hosts.ep["listener"]
     cp = run_subprocess(
         host, cfg.remote_env,
         "globus-streams environment initialize "
+<<<<<<< Updated upstream
         f"--listener-contact-string {cfg.listener_ip}:{cfg.ep_port} "
+=======
+        f"--listener-contact-string {cfg.listener_ip}:{cfg.tunnel_port} "
+>>>>>>> Stashed changes
         f"{shlex.quote(tunnel_id)}",
         localhost=cfg.localhost,
     )
@@ -298,7 +526,7 @@ def init_listener_env(cfg: Config, tunnel_id: str, check: bool = True) -> None:
 
 
 def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> int:
-    host = cfg.hosts.ep.get("initiator")
+    host = cfg.hosts.ep("initiator")
     cp = run_subprocess(
         host, cfg.remote_env,
         f"globus-streams environment initialize {shlex.quote(tunnel_id)} ",
@@ -324,6 +552,7 @@ def stop_statkit(cfg: Config) -> None:
         )
         logging.debug("IPERF: Stopped statkit on %s", host.upper())
 
+
 _STATE = re.compile(r"^\s*State:\s*(?P<state>\S+)\s*$", re.MULTILINE)
 _STATUS = re.compile(r"^\s*Status:\s*(?P<status>.+?)\s*$", re.MULTILINE)
 def _parse_status(output: str) -> tuple[str, str]:
@@ -333,9 +562,9 @@ def _parse_status(output: str) -> tuple[str, str]:
 
     m_status = _STATUS.search(output)
     status = m_status.group("status").strip() if m_status else ""
-
     state = m_state.group("state")
     return state, status
+
 
 
 def status_tunnel(cfg: Config, tunnel_id: str) -> tuple[str, str]:
@@ -345,8 +574,8 @@ def status_tunnel(cfg: Config, tunnel_id: str) -> tuple[str, str]:
         localhost=cfg.localhost,
         check=False,
     )
-    status, state = _parse_status((cp.stdout + "\n" + cp.stderr).strip())
-    return status, state
+    state, status = _parse_status((cp.stdout + "\n" + cp.stderr).strip())
+    return state, status
 
 
 def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
@@ -357,7 +586,11 @@ def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
         check=False,
     )
     state, status = status_tunnel(cfg, tunnel_id)
+<<<<<<< Updated upstream
     logging.info("LOCAL: Stop stream tunnel %s: %s \n\n", tunnel_id, state)
+=======
+    logging.info("LOCAL: Stop stream tunnel %s: %s ", tunnel_id, state, status)
+>>>>>>> Stashed changes
 
 
 def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
@@ -373,48 +606,95 @@ def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
     else:
         raise RuntimeError(f"LOCAL: Tunnel was not deleted: {tunnel_id}\n")
 
+<<<<<<< Updated upstream
 def start_iperf_server(cfg: Config, host: str, port:int, tunnel_id: str, out_dir: str) -> subprocess.Popen[str]:
     #host = cfg.hosts.ep.get("listener")
+=======
+
+def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, temp_file: str, app: str, out_dir: str) -> subprocess.Popen[str]:
+    extra_arg = f"-F {shlex.quote(temp_file)} " if cfg.test == "transfer" else ""
+>>>>>>> Stashed changes
     cp = popen_subprocess(
     #cp = run_subprocess(
         host, cfg.remote_env,
         "globus-streams-launch "
         f"-p {port} {shlex.quote(tunnel_id)} "
+<<<<<<< Updated upstream
         f"iperf3 -s -p {port} -1 --timestamps "
         f"-J --logfile {out_dir}/iperf.json --forceflush & "
+=======
+        f"iperf3 -s -p {port} -1  --timestamps  --forceflush "
+        #f"-F {temp_file}"
+        f"{extra_arg} "
+        f"-J --logfile {out_dir}/{shlex.quote(app)}.json & "
+>>>>>>> Stashed changes
         "echo $! " ,
         localhost=cfg.localhost,
     )
     logging.info("IPERF: Started iperf3 server on host %s", host.upper())
 
+<<<<<<< Updated upstream
 def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     #host = cfg.hosts.ep.get("initiator")
+=======
+
+#def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, 
+    parallel: int, arg: int, 
+    temp_file: str, app: str, out_dir: str, 
+    timeout: int, check: bool = True) -> subprocess.CompletedProcess[str]:
+    extra_arg = f"-Z -R -n {arg}G -F {shlex.quote(temp_file)} " if cfg.test == "transfer" else f"-P {parallel} -i 10 -O 10 -Z -R -t {arg} "
+>>>>>>> Stashed changes
     cp = run_subprocess(
         host, cfg.remote_env,
         "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "
+<<<<<<< Updated upstream
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
         f"-J --logfile {shlex.quote(out_dir)}/iperf.json --forceflush "
         f"-P {parallel} -i 10 -O 10 -Z -R -t {t} --timestamps ",
         localhost=cfg.localhost,
         timeout= t * 120,
+=======
+        f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} --timestamps  --forceflush "
+        f"{extra_arg} "
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
+        #f"-P {parallel} -i 10 -O 10 -Z -R -t {t} ",
+        #f"-Z -R -n {arg}G -F {temp_file} ",
+        localhost=cfg.localhost,
+        timeout=timeout,
+>>>>>>> Stashed changes
     )
     n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
     tail = "\n".join(cp.stdout.splitlines()[-n:])
     logging.info("IPERF: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
     return cp
 
+<<<<<<< Updated upstream
 def base_start_iperf_server(cfg: Config, host: str, port: int, out_dir: str) -> subprocess.Popen[str]:
     #host = cfg.hosts.ep.get("listener")
     cp = popen_subprocess(
         host, None,
         f"iperf3 -s -p {port} -1 --timestamps "
         f"-J --logfile {shlex.quote(out_dir)}/iperf.json --forceflush & "
+=======
+
+#def base_start_iperf_server(cfg: Config, host: str, port: int, out_dir: str) -> subprocess.Popen[str]:
+def base_start_iperf_server(cfg: Config, host: str, port: int, temp_file: str, app: str, out_dir: str) -> subprocess.Popen[str]:
+    extra_arg = f"-F {shlex.quote(temp_file)} " if cfg.test == "transfer" else ""
+    cp = popen_subprocess(
+        host, None,
+        f"iperf3 -s -p {port} -1 --timestamps --forceflush "
+        #f"-F {temp_file} "
+        f"{extra_arg} "
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json  & "
+>>>>>>> Stashed changes
         "echo $! " ,
         localhost=cfg.localhost,
     )
     logging.info("BASELINE: Started iperf3 server on %s", host.upper())
 
+<<<<<<< Updated upstream
 def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     cp = run_subprocess(
         host, cfg.remote_env,
@@ -423,6 +703,24 @@ def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int,
         f"-P {parallel} -i 10 -O 10 -Z -R -t {t} --timestamps ",
         localhost=cfg.localhost,
         timeout= t * 120,
+=======
+
+#def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int, 
+    parallel: int, arg: int, 
+    temp_file: str, app: str, out_dir: str, 
+    timeout: int, check: bool = True) -> subprocess.CompletedProcess[str]:
+    extra_arg = f"-Z -R -n {arg}G -F {shlex.quote(temp_file)} " if cfg.test == "transfer" else f"-P {parallel} -i 10 -O 10 -Z -R -t {arg} "
+    cp = run_subprocess(
+        host, cfg.remote_env,
+        f"iperf3 -c {listener_ip} -p {port} --timestamps --forceflush "
+        #f"-P {parallel} -i 10 -O 10 -Z -R -t {t} ",
+        #f"-Z -R -n {arg}G -F {temp_file} ",
+        f"{extra_arg} "
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
+        localhost=cfg.localhost,
+        timeout= timeout,
+>>>>>>> Stashed changes
     )
     n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
     tail = "\n".join(cp.stdout.splitlines()[-n:])
