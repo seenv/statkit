@@ -133,8 +133,6 @@ def popen_subprocess(host: str, env: Optional[str], cmd: str, *, localhost: str)
 
 # TODO: add run subprocess via globus python agent
 
-
-
 # Helpers:
 #def make_temp_file(cfg: Config, host: str, size: int, file_path: str) -> None:
 def make_temp_file(cfg: Config, size: int, file_path: str) -> None:
@@ -173,19 +171,20 @@ def _parse_uid(output: str) -> str:
     raise RuntimeError(f"Could not find UUID in output:\n{output}")
 
 #def _parse_gateway_id_by_name(output: str, name: str, *, exact: bool = False) -> str:
-def _parse_gateway_uid(output: str, name: str, *, exact: bool = False) -> str:
-    want = name.strip()
+def _parse_gateway_uid(output: str,  parts: list[str], *, exact: bool = False) -> str:
+    #want = name.strip()
     for line in output.splitlines():
         if "|" not in line:
             continue
         if line.strip().startswith("---"):
             continue
-
         # first column is Display Name
         display = line.split("|", 1)[0].strip()
 
-        match = (display == want) if exact else (want in display)
-        if not match:
+        # match = (display == want) if exact else (want in display)
+        # if not match:
+        #     continue
+        if not all(part in display for part in parts):
             continue
 
         m = _UUID_CANDIDATE.search(line)
@@ -193,7 +192,7 @@ def _parse_gateway_uid(output: str, name: str, *, exact: bool = False) -> str:
             raise RuntimeError(f"Matched name but no UUID found on line:\n{line}")
         return str(uuid.UUID(m.group(0)))
 
-    raise RuntimeError(f"No gateway row matched name={name!r}.\nOutput:\n{output}")
+    raise RuntimeError(f"No gateway row matched name={parts!r}.\nOutput:\n{output}")
 
 
 def _parse_contact_port(output: str) -> int:
@@ -206,21 +205,41 @@ def _parse_contact_port(output: str) -> int:
     return int(m.group("port"))
 
 
-def blk_config(cfg: Config, blk: int, check: bool = True) -> None:
+def gridftp_config(cfg: Config, blk: int, awai:int, check: bool = True) -> None:
     for host in cfg.hosts.ap.values():
         cp = run_subprocess(
             host, None,
-            f"sudo sed -i -E 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' /etc/gridftp.d/zdebug; "
+            f"sudo sed -i -E "
+            f"-e 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|$AWAI_SPLICE_ROUTING {awai}|' "
+            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}|' "
+            f"/etc/gridftp.d/zdebug; "
             f"cat /etc/gridftp.d/zdebug ",
             localhost=cfg.localhost
         )
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"IPERF: Failed changing the blocksize on {host.upper()}"
+                f"GFTP: Failed changing the blocksize on {host.upper()}"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         head = "\n".join(cp.stdout.splitlines()[:5])
-        logging.debug("IPERF: Gridftp blocksize config on %s:\n%s", host.upper(), head)
+        logging.debug("GFTP: Gridftp splice and blocksize config on %s:\n%s", host.upper(), head)
+
+
+def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
+    for host in cfg.hosts.ap.values():
+        cp = run_subprocess(
+            host, None,
+            f"mkdir -p {shlex.quote(out_dir)} && "
+            f"sudo cat /etc/gridftp.d/zdebug > {shlex.quote(out_dir)}/gridftp.log ",
+            localhost=cfg.localhost
+        )
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"GFTP: Failed changing the gridftp configuration on {host.upper()}"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+        logging.debug("GFTP: Recorded the Gridftp configuration on %s", host.upper())
 
 
 def _sysctl_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
@@ -419,7 +438,11 @@ def cleanup_iperf(cfg: Config, check: bool = True) -> None:
     for host in hosts:
     # for host in cfg.hosts.ep.values():
     # host = cfg.hosts.ep.get("listener")
-        cp = run_subprocess(host, None,"pkill -TERM -f '[i]perf3' || true ", localhost=cfg.localhost)
+        cp = run_subprocess(
+            host, None,
+            "pkill -TERM -f '[i]perf3' || true ", 
+            localhost=cfg.localhost
+        )
         if check and cp.returncode != 0:
             raise RuntimeError(
                 f"IPERF: Failed killing iperf on {host.upper()}\n "
@@ -438,7 +461,10 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         #out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr)
-        out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, "AP")
+        #out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, "AP")
+        #gateway_name = role.capitalize()
+        #out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, gateway_name)
+        out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, [cfg.lease, role.capitalize()], exact=False)
         logging.debug("IPERF: Stream Gateway id on %s %s", host.upper(), cp.stdout.strip())
     missing = {"initiator", "listener"} - set(out.keys())
     if missing:
@@ -505,7 +531,7 @@ def init_listener_env(cfg: Config, tunnel_id: str, check: bool = True) -> None:
 
 
 def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> int:
-    host = cfg.hosts.ep("initiator")
+    host = cfg.hosts.ep["initiator"]
     cp = run_subprocess(
         host, cfg.remote_env,
         f"globus-streams environment initialize {shlex.quote(tunnel_id)} ",
@@ -545,7 +571,6 @@ def _parse_status(output: str) -> tuple[str, str]:
     return state, status
 
 
-
 def status_tunnel(cfg: Config, tunnel_id: str) -> tuple[str, str]:
     cp = run_subprocess(
         cfg.localhost, cfg.local_env,
@@ -566,7 +591,7 @@ def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
     )
     state, status = status_tunnel(cfg, tunnel_id)
     #logging.info("LOCAL: Stop stream tunnel %s: %s \n\n", tunnel_id, state)
-    logging.info("LOCAL: Stop stream tunnel %s: %s ", tunnel_id, state, status)
+    logging.info("LOCAL: Stop stream tunnel %s: %s %s", tunnel_id, state, status)
 
 
 def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
@@ -581,6 +606,7 @@ def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
         logging.info("LOCAL: Delete streams tunnel %s: %s", tunnel_id, out)
     else:
         raise RuntimeError(f"LOCAL: Tunnel was not deleted: {tunnel_id}\n")
+
 
 #def start_iperf_server(cfg: Config, host: str, port:int, tunnel_id: str, out_dir: str) -> subprocess.Popen[str]:
 def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, temp_file: str, app: str, out_dir: str) -> subprocess.Popen[str]:
@@ -610,6 +636,8 @@ def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int
     extra_arg = f"-Z -R -n {arg}G -F {shlex.quote(temp_file)} " if cfg.test == "transfer" else f"-P {parallel} -i 10 -O 10 -Z -R -t {arg} "
     cp = run_subprocess(
         host, cfg.remote_env,
+        #f"/usr/bin/time -f 'elapsed_seconds=%e\\nuser_seconds=%U\\nsys_seconds=%S\\ncpu_percent=%P' "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/iperf_time.log "
         "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} --timestamps  --forceflush "
@@ -638,7 +666,7 @@ def base_start_iperf_server(cfg: Config, host: str, port: int, temp_file: str, a
         "echo $! " ,
         localhost=cfg.localhost,
     )
-    logging.info("BASELINE: Started iperf3 server on %s", host.upper())
+    logging.info("BASE: Started iperf3 server on %s", host.upper())
 
 
 #def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int, t : int, parallel: int, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -659,17 +687,46 @@ def base_start_iperf_client(cfg: Config, host: str, listener_ip: str, port: int,
     )
     n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
     tail = "\n".join(cp.stdout.splitlines()[-n:])
-    logging.info("BASELINE: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
+    logging.info("BASE: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
     return cp
 
-def record_ping(cfg: Config, host: str, dest_ip: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+
+def start_rsync(cfg: Config, src_host: str, dst_host: str, temp_file: str, out_dir: str, timeout: int) -> None:
+    cmd = (
+        f"mkdir -p {shlex.quote(out_dir)} && "
+        #f"/usr/bin/time -f 'elapsed_seconds=%e\\nuser_seconds=%U\\nsys_seconds=%S\\ncpu_percent=%P' "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync_time.log "
+        f"rsync -avvv --info=progress2,stats2 --no-compress "
+        f"--mkpath --no-checksum --whole-file --ignore-times "
+        f"-e {shlex.quote('ssh -T -o Compression=no -o StrictHostKeyChecking=no')} "
+        f"{shlex.quote(temp_file)} {shlex.quote(dst_host)}:{shlex.quote(temp_file)} "
+        f"--log-file={shlex.quote(out_dir)}/rsync_log.log "
+        f"2>&1 | tr '\\r' '\\n' | "
+        #f"stdbuf -oL awk 'NF {{ print strftime(\"%Y-%m-%d %H:%M:%S\"), strftime(\"%s\"), $0; fflush(); }}' "
+        f"stdbuf -oL awk 'NF {{ print strftime(\"%Y-%m-%d %H:%M:%S\"), $0; fflush(); }}' "
+        f"| tee {shlex.quote(out_dir)}/rsync.log"
+    )
+
+    cp = run_subprocess(
+        src_host,
+        None,
+        cmd,
+        localhost=cfg.localhost,
+        timeout=timeout
+    )
+    logging.info("RSYNC: Completed direct rsync from %s to %s", src_host.upper(), dst_host)
+    logging.debug("RSYNC stdout:\n%s", cp.stdout)
+
+
+#def record_ping(cfg: Config, host: str, dest_ip: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def record_ping(cfg: Config, host: str, dest_ip: str, app: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     cp = run_subprocess(
         host, None,
         #f"netserver   # on listener side "
         #f"netperf -H <listener_ip> -t TCP_RR -l 30   # from initiator side"
         #f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} > {shlex.quote(out_dir)}/ping.log ",
         #f"ping -4 -n -D -i 0.5 -c 20 {dest_ip} > {shlex.quote(out_dir)}/ping.log ",
-        f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} | tee {shlex.quote(out_dir)}/ping.log ",
+        f"ping -4 -n -q -i 0.5 -c 20 {dest_ip} | tee {shlex.quote(out_dir)}/{shlex.quote(app)}-ping.log ",
         localhost=cfg.localhost,
     )
     logging.debug("%s: Ping log %s", host.upper(), cp.stdout)

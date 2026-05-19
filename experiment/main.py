@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from datetime import datetime
 
 from config import TEST
@@ -9,7 +10,11 @@ from utils import setup_logging
 
 # TODO: define a class and create ctrl to run the setup pipeline 
 def main() -> None:
-    setup_logging(TEST.verbose)
+    log_dir = Path("/tmp/statkit")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{TEST.test.replace(" ", "_")}-{datetime.now().strftime('%m-%d-%H-%M-%S')}.log"
+    setup_logging(TEST.verbose, str(log_path))
+    # setup_logging(TEST.verbose, f"/tmp/statkit/{shlex(TEST.test)}-{shlex(datetime.now().strftime('%Y-%m-%d-%H:%M:%S'))}.log")
     logging.info("MAIN: Starting the experiment: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     # try:
