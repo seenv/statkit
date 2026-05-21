@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Iterable, Optional, Sequence, List, Dict, Tuple
 #from os.path import expanduser
 from pathlib import PurePosixPath
+from datetime import datetime
+import socket
+import traceback
 
 from config import Config, Role
 
@@ -131,7 +134,43 @@ def popen_subprocess(host: str, env: Optional[str], cmd: str, *, localhost: str)
     logging.debug("POPEN: %s", argv)
     return subprocess.Popen(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-# TODO: add run subprocess via globus python agent
+
+def notify(topic: str, title: str, message: str) -> None:
+    subprocess.run(
+        [
+            "curl",
+            "-H", f"Title: {title}",
+            "-d", message,
+            f"https://ntfy.sh/{topic}",
+        ],
+        check=False,
+    )
+
+
+def send_ntfy(success: bool, cfg: Config, error: Exception | None = None) -> None:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if success:
+        title = f"Experiment '{cfg.test.capitalize()}' finished"
+        message = (
+            #f"Experiment finished successfully.\n"
+            f"Lease: {cfg.lease}\n"
+            f"Time: {now}\n"
+        )
+    else:
+        title = f"Experiment '{cfg.test.capitalize()}' failed"
+        message = (
+            f"Lease: {cfg.lease}\n"
+            f"Time: {now}\n"
+            f"Error:{error}\n"
+            #f"Traceback:\n{traceback.format_exc()}"
+        )
+    notify(
+        #topic="seena-experiments",
+        topic=f"{cfg.test.replace(' ', '-')}",
+        title=title,
+        message=message,
+    )
+
 
 # Helpers:
 #def make_temp_file(cfg: Config, host: str, size: int, file_path: str) -> None:
@@ -436,8 +475,6 @@ def restart_gridftp(cfg: Config, check: bool = True) -> None:
 def cleanup_iperf(cfg: Config, check: bool = True) -> None:
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
-    # for host in cfg.hosts.ep.values():
-    # host = cfg.hosts.ep.get("listener")
         cp = run_subprocess(
             host, None,
             "pkill -TERM -f '[i]perf3' || true ", 
@@ -564,22 +601,33 @@ def _parse_status(output: str) -> tuple[str, str]:
     m_state = _STATE.search(output)
     if not m_state:
         raise RuntimeError(f"Could not find State in output:\n{output}")
-
     m_status = _STATUS.search(output)
     status = m_status.group("status").strip() if m_status else ""
     state = m_state.group("state")
     return state, status
 
 
-def status_tunnel(cfg: Config, tunnel_id: str) -> tuple[str, str]:
-    cp = run_subprocess(
-        cfg.localhost, cfg.local_env,
-        f"globus streams tunnel show {shlex.quote(tunnel_id)}",
-        localhost=cfg.localhost,
-        check=False,
+def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 100, wait: int = 5) -> tuple[str, str]:
+    for ret in range(1, retry + 1):
+        cp = run_subprocess(
+            cfg.localhost, cfg.local_env,
+            f"globus streams tunnel show {shlex.quote(tunnel_id)}",
+            localhost=cfg.localhost,
+            check=False,
+        )
+        state, status = _parse_status((cp.stdout + "\n" + cp.stderr).strip())   # AWAITING_LISTENER, ACTIVE, STOPPING, STOPPED
+        if state == stat:
+            logging.info("GST: Tunnel State %s | Status %s", state, status)
+            return state, status
+        if ret < retry:
+            logging.info(
+                "GST: Waiting for tunnel to reache %s. Current state: %s. Retry: %d / %d next try in %d secs", 
+                stat, state, ret, retry, wait)
+            time.sleep(wait)
+    raise RuntimeError(
+        f"GST: The tunnel state is {state} and did not change to {stat} after "
+        f"{retry} attempts over about {max(0, retry - 1) * wait}s."
     )
-    state, status = _parse_status((cp.stdout + "\n" + cp.stderr).strip())
-    return state, status
 
 
 def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
@@ -589,9 +637,9 @@ def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
         localhost=cfg.localhost,
         check=False,
     )
-    state, status = status_tunnel(cfg, tunnel_id)
+    #state, status = status_tunnel(cfg, tunnel_id)
     #logging.info("LOCAL: Stop stream tunnel %s: %s \n\n", tunnel_id, state)
-    logging.info("LOCAL: Stop stream tunnel %s: %s %s", tunnel_id, state, status)
+    logging.info("LOCAL: Stoping the stream tunnel %s", tunnel_id)
 
 
 def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
@@ -601,11 +649,7 @@ def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
         localhost=cfg.localhost,
         check=False,
     )
-    out = (cp.stdout + "\n" + cp.stderr).strip()
-    if out:
-        logging.info("LOCAL: Delete streams tunnel %s: %s", tunnel_id, out)
-    else:
-        raise RuntimeError(f"LOCAL: Tunnel was not deleted: {tunnel_id}\n")
+    logging.info("LOCAL: Deleted the streams tunnel %s", tunnel_id)
 
 
 #def start_iperf_server(cfg: Config, host: str, port:int, tunnel_id: str, out_dir: str) -> subprocess.Popen[str]:

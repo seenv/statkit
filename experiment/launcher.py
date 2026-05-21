@@ -11,7 +11,7 @@ from utils import init_listener_env, init_initiator_env, gridftp_report
 from utils import make_temp_file, start_statkit, stop_statkit, cleanup_iperf
 from utils import start_iperf_server, start_iperf_client, system_state_report
 from utils import base_start_iperf_server, base_start_iperf_client
-from utils import start_rsync, prepare_remote_dest
+from utils import start_rsync, prepare_remote_dest, status_tunnel
 
 
 def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
@@ -22,12 +22,13 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
     logging.info("----- Tests: %d / %d ------- Strarting iPerf3 Tunnel Tests", idx, total_runs)
     ids = get_stream_id(cfg)
     initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
-    #tunnel_label = f"{cfg.lease.replace(" ", "_")}-idx{idx}-ttl{total_runs}"
     tunnel_label = f"{cfg.lease.replace(' ', '_')}-idx{idx}-tot{total_runs}"
     tunnel_id = start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label)
     time.sleep(cfg.sleep)
 
     try:
+        logging.info("GST: Waiting for tunnel to get activated")
+        status_tunnel(cfg, tunnel_id, "AWAITING_LISTENER")
         # launch statkit
         logging.info("GST: Starting the statkit monitoring on the hosts")
         start_statkit(cfg, timeout, "iperf_gst", output_dir)   #size as duration which will be * 60s
@@ -35,7 +36,8 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         # init listener env 
         logging.info("GST: Bringing up the tunnel on Listener AP")
         init_listener_env(cfg, tunnel_id)
-        time.sleep(cfg.sleep)
+        # waiting till the tunnel gets activated
+        status_tunnel(cfg, tunnel_id, "ACTIVE")
         # init initiator env + discover contact port
         logging.info("GST: Bringing up the tunnel on Initiator AP")
         contact_port = init_initiator_env(cfg, tunnel_id)
@@ -57,10 +59,11 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
     finally:
         # TODO: check why monitor finishes before transfer!
         logging.info("GST: Stopping the statkit monitoring on the hosts")
-        stop_statkit(cfg)
         cleanup_iperf(cfg)
+        stop_statkit(cfg)
         stop_tunnel(cfg, tunnel_id)
-        time.sleep(cfg.sleep)
+        status_tunnel(cfg, tunnel_id, "STOPPED")
+        delete_tunnel(cfg, tunnel_id)
         restart_gridftp(cfg)
         # delete_tunnel(cfg, tunnel_id)
 
@@ -150,7 +153,7 @@ def experiment_main(cfg: Config) -> None:
         #tunnel_out_dir = f"{cfg.report_dir}/{block}/{size}/{run}"
         #direct_out_dir = f"{cfg.report_dir}/{block}/{size}/{run}"
         #rsync_out_dir = f"{cfg.report_dir}/{block}/{size}/{run}"
-        output_dir = f"{cfg.report_dir}/S{splice}/{block}/{parallel}/{arg}/{run}"
+        output_dir = f"{cfg.report_dir}/S{splice}/B{block}/P{parallel}/A{arg}/R{run}"
         timeout = (arg * 120) #if cfg.test == "transfer" else (duration * 120)
 
         if block != last_block or splice != last_splice:
