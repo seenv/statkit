@@ -22,7 +22,7 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
     logging.info("----- Tests: %d / %d ------- Strarting iPerf3 Tunnel Tests", idx, total_runs)
     ids = get_stream_id(cfg)
     initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
-    tunnel_label = f"{cfg.lease.replace(' ', '_')}-idx{idx}-tot{total_runs}"
+    tunnel_label = f"{cfg.lease.replace(' ', '_')}-{cfg.test.replace(' ', '_')}-idx{idx}-tot{total_runs}"
     tunnel_id = start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label)
     time.sleep(cfg.sleep)
 
