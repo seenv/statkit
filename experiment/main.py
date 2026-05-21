@@ -15,7 +15,7 @@ def main() -> None:
     setup_logging(TEST.verbose, str(log_path))
     logging.info("MAIN: Starting the experiment: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     try:
-        if TEST.test in {"globus", "transfer"}:
+        if TEST.test in {"stream", "transfer"}:
             experiment_main(TEST)
         else:
             raise ValueError(f"Unknown test value: {TEST.test}")
