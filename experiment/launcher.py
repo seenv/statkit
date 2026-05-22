@@ -153,7 +153,10 @@ def experiment_main(cfg: Config) -> None:
         #tunnel_out_dir = f"{cfg.report_dir}/{block}/{size}/{run}"
         #direct_out_dir = f"{cfg.report_dir}/{block}/{size}/{run}"
         #rsync_out_dir = f"{cfg.report_dir}/{block}/{size}/{run}"
-        output_dir = f"{cfg.report_dir}/S{splice}/B{block}/P{parallel}/A{arg}/R{run}"
+        if cfg.test == "transfer":
+            output_dir = f"{cfg.report_dir}/A{splice}/B{block}/P{parallel}/S{arg}/R{run}"
+        elif cfg.test == "stream":
+            output_dir = f"{cfg.report_dir}/A{splice}/B{block}/P{parallel}/T{arg}/R{run}"
         timeout = (arg * 120) #if cfg.test == "transfer" else (duration * 120)
 
         if block != last_block or splice != last_splice:

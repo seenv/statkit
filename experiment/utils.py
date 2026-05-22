@@ -681,7 +681,7 @@ def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int
     cp = run_subprocess(
         host, cfg.remote_env,
         #f"/usr/bin/time -f 'elapsed_seconds=%e\\nuser_seconds=%U\\nsys_seconds=%S\\ncpu_percent=%P' "
-        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/iperf_time.log "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
         "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} --timestamps  --forceflush "
