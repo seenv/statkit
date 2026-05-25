@@ -5,13 +5,13 @@ import time
 
 from config import Config
 
-from utils import restart_gridftp, get_stream_id, start_tunnel
+from utils import restart_gridftp, get_stream_id, start_tunnel, status_tunnel
 from utils import stop_tunnel, delete_tunnel, record_ping, gridftp_config
 from utils import init_listener_env, init_initiator_env, gridftp_report
-from utils import make_temp_file, start_statkit, stop_statkit, cleanup_iperf
+from utils import make_file, start_statkit, stop_statkit, cleanup_iperf
 from utils import start_iperf_server, start_iperf_client, system_state_report
 from utils import base_start_iperf_server, base_start_iperf_client
-from utils import start_rsync, prepare_remote_dest, status_tunnel
+from utils import start_rsync_daemon, start_rsync_transfer
 
 
 def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
@@ -65,7 +65,6 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         status_tunnel(cfg, tunnel_id, "STOPPED")
         delete_tunnel(cfg, tunnel_id)
         restart_gridftp(cfg)
-        # delete_tunnel(cfg, tunnel_id)
 
 
 def run_iperf_baseline(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
@@ -98,20 +97,23 @@ def run_iperf_baseline(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         cleanup_iperf(cfg)
 
 
-def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
-    temp_file: str, listener_host: str, initiator_host: str, output_dir: str) -> None:
+def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
+    listener_host: str, initiator_host: str, output_dir: str) -> None:
     print("\n")
     logging.info("----- Test %d / %d: starting rsync test -----", idx, total_runs)
     try:
         logging.info("RSYNC: Starting statkit monitoring")
         start_statkit(cfg, timeout, "rsync", output_dir)   #size as duration which will be * 60s
         time.sleep(cfg.sleep)
-        logging.info("RSYNC: Starting direct rsync transfer")   #it will run on server and log it there
-        start_rsync(
-            cfg, listener_host, initiator_host,
-            temp_file, output_dir, timeout
-        )
-
+        
+        logging.info("RSYNC: Starting the rsync deamon on the host %s", initiator_host.upper())
+        start_rsync_daemon(
+            cfg, initiator_host, output_dir, cfg.rsync_port, timeout,
+            cfg.test, "/tmp/temp_files")
+        logging.info("RSYNC: Starting direct rsync transfer")
+        start_rsync_transfer(
+            cfg, listener_host, initiator_host, temp_file, output_dir, cfg.rsync_port, timeout,
+            cfg.test, "/tmp/temp_files")
         logging.info("RSYNC: Recording RTT")        # it will run on the client
         record_ping(cfg, initiator_host, cfg.listener_ip, "rsync", output_dir)
 
@@ -150,9 +152,6 @@ def experiment_main(cfg: Config) -> None:
             "--------------- Tests: %d / %d : splice %s / blocksize %s / arg %s / run %s ---------------",
             idx, total_runs, splice, block, arg, run)
 
-        #tunnel_out_dir = f"{cfg.report_dir}/{block}/{size}/{run}"
-        #direct_out_dir = f"{cfg.report_dir}/{block}/{size}/{run}"
-        #rsync_out_dir = f"{cfg.report_dir}/{block}/{size}/{run}"
         if cfg.test == "transfer":
             output_dir = f"{cfg.report_dir}/A{splice}/B{block}/P{parallel}/S{arg}/R{run}"
         elif cfg.test == "stream":
@@ -164,9 +163,9 @@ def experiment_main(cfg: Config) -> None:
             gridftp_config(cfg, block, splice)
             last_block, last_splice = block, splice
 
-        temp_file = f"/tmp/temp_file/{arg}G.bin"
+        temp_file = f"{arg}G.bin"
         if cfg.test == "transfer":
-            make_temp_file(cfg, arg, temp_file)
+            make_file(cfg, arg, temp_file)
 
         logging.info("GFTP: Recording the Gridftp configuration")
         gridftp_report(cfg, output_dir)
@@ -175,8 +174,7 @@ def experiment_main(cfg: Config) -> None:
         if "iperf" in cfg.app:
             run_iperf_gst(
                 cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
-                parallel=parallel, arg=arg,
-                temp_file=temp_file, port=cfg.tunnel_port,
+                parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.tunnel_port,
                 listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"), 
                 output_dir=output_dir,
             )
@@ -185,8 +183,7 @@ def experiment_main(cfg: Config) -> None:
         if "base" in cfg.app:
             run_iperf_baseline(
                 cfg, idx=idx, total_runs=total_runs, timeout=timeout,
-                parallel=parallel, arg=arg,
-                temp_file=temp_file, port=cfg.direct_port,
+                parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.direct_port,
                 listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"),
                 output_dir=output_dir,
             )
@@ -194,8 +191,7 @@ def experiment_main(cfg: Config) -> None:
 
         if "rsync" in cfg.app:
             run_rsync(
-                cfg, idx=idx, total_runs=total_runs, timeout=timeout, 
-                temp_file=temp_file,
+                cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
                 listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"),
                 output_dir=output_dir,
             )

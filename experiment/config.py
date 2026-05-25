@@ -40,9 +40,11 @@ def parse_args():
     p.add_argument("--lease", type=str, required=True, help="Lease name on the testbed")
     p.add_argument("--test", type=str, required=True, choices=["stream", "transfer"], help="Experimet / test to perform (stream | transfer)")
     
-    p.add_argument("--listen_ip", "-ip",  type=str, default="192.168.10.10", help="The IP address of the listener (default: 192.168.10.10)") # default="10.52.2.167"
-    p.add_argument("--directport", type=int, default=49999, help="The default port for iperf3 baseline (default: 49999)")
+    p.add_argument("--listener_ip",  type=str, default="192.168.10.10", help="The IP address of the listener (default: 192.168.10.10)") # default="10.52.2.167"
+    p.add_argument("--initiator_ip",  type=str, default="192.168.20.10", help="The IP address of the initiator (default: 192.168.20.10)") # default="10.52.2.167"
     p.add_argument("--tunnelport", type=int, default=50000, help="The default port for iperf3 through the tunnel (default: 50000)")
+    p.add_argument("--directport", type=int, default=49999, help="The default port for iperf3 baseline (default: 49999)")
+    p.add_argument("--rsyncport", type=int, default=49998, help="The default port for rsync (default: 49998)")
     #p.add_argument("--port", type=int, default=49998, help="The default port")
     p.add_argument("--sleep", type=int, default=10, help="DEBUG: Sleep time between between the commands (default: 10)")
 
@@ -76,8 +78,10 @@ class Config:
     localhost: str
     hosts: Hosts
     listener_ip: str
-    direct_port: int
+    initiator_ip: str
     tunnel_port: int
+    direct_port: int
+    rsync_port: int
     #port: int
     sleep: int
     
@@ -109,10 +113,12 @@ TRANSFER = Config(
         ap={"initiator": "fab-c2cs", "listener": "fab-p2cs"},
         ep={"initiator": "fab-cons", "listener": "fab-prod"},
     ),
-    listener_ip=args.listen_ip,
-    direct_port=args.directport,#49999,
-    tunnel_port=args.tunnelport, #50000,
-    #port=args.rsyncport, #49998,
+    listener_ip=args.listener_ip,
+    initiator_ip=args.initiator_ip,
+    tunnel_port=args.tunnelport,
+    direct_port=args.directport,
+    rsync_port=args.rsyncport,
+    #port=args.rsyncport,
     sleep=args.sleep,
 
     # test configuration
@@ -142,10 +148,12 @@ STREAM = Config(
         ap={"initiator": "fab-consap", "listener": "fab-prodap"},
         ep={"initiator": "fab-consep", "listener": "fab-prodep"},
     ),
-    listener_ip=args.listen_ip,
-    direct_port=args.directport,#49999,
-    tunnel_port=args.tunnelport, #50000,
-    #port=args.rsyncport, #49998,
+    listener_ip=args.listener_ip,
+    initiator_ip=args.initiator_ip,
+    tunnel_port=args.tunnelport,
+    direct_port=args.directport,
+    rsync_port=args.rsyncport,
+    #port=args.rsyncport,
     sleep=args.sleep,
 
     # test configuration
@@ -164,10 +172,4 @@ STREAM = Config(
     remote_env="/home/ubuntu/streams-cli/bin/activate",
 )
 
-# if args.test == "globus":
-#     TEST = GLOBUS
-# elif args.test == "transfer":
-#     TEST = TRANSFER
-# else:
-#     raise ValueError(f"Unknown test value: {args.test}")
 TEST = STREAM if args.test == "stream" else TRANSFER

@@ -29,14 +29,14 @@ def main() -> None:
     print(
         f"\nFinished runing the experiment with vals: \n"
         f"Lease: {TEST.lease} \n",
-        f"TEST: {TEST.test} \n",
+        f"Test: {TEST.test} \n",
         f"Apps: {TEST.app} \n",
         f"Splice: {TEST.lease} \n",
-        f"Parallels: {TEST.parallels} \n"
+        f"Parallels: {TEST.parallels} \n",
         f"Time Frames: {TEST.time_frames} \n",
-        f"File sizes: {TEST.file_sizes} \n"
-        f"Block sizes: {TEST.blocks} \n"
-        f"Repeat runs: {TEST.run_num} \n"
+        f"File sizes: {TEST.file_sizes} \n",
+        f"Block sizes: {TEST.blocks} \n",
+        f"Repeat runs: {TEST.run_num} \n",
         )
 
 if __name__ == "__main__":
