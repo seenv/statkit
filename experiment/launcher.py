@@ -127,8 +127,8 @@ def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file
 
 def experiment_main(cfg: Config) -> None:
     
-    parallels = cfg.parallels if cfg.test == "globus" else [1]
-    args = cfg.time_frames if cfg.test == "globus" else cfg.file_sizes
+    parallels = cfg.parallels if cfg.test == "stream" else [1]
+    args = cfg.time_frames if cfg.test == "streams" else cfg.file_sizes
     splices = cfg.splice
     blocks = cfg.blocks
     runs = cfg.run_num
