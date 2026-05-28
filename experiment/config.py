@@ -113,7 +113,7 @@ TRANSFER = Config(
     test=args.test,
 
     # hosts
-    localhost=args.localhost,
+    localhost=args.userhost,
     # hosts=Hosts(
     #     ap={
     #         "initiator": args.initiator_ap,
@@ -157,7 +157,7 @@ STREAM = Config(
     lease=args.lease,
 
     # hosts
-    localhost=args.localhost,
+    localhost=args.userhost,
     # hosts=Hosts(
     #     ap={
     #         "initiator": args.initiator_ap,
