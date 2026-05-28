@@ -40,12 +40,17 @@ def parse_args():
     p.add_argument("--lease", type=str, required=True, help="Lease name on the testbed")
     p.add_argument("--test", type=str, required=True, choices=["stream", "transfer"], help="Experimet / test to perform (stream | transfer)")
     
-    p.add_argument("--listener_ip",  type=str, default="192.168.10.10", help="The IP address of the listener (default: 192.168.10.10)") # default="10.52.2.167"
-    p.add_argument("--initiator_ip",  type=str, default="192.168.20.10", help="The IP address of the initiator (default: 192.168.20.10)") # default="10.52.2.167"
-    p.add_argument("--tunnelport", type=int, default=50000, help="The default port for iperf3 through the tunnel (default: 50000)")
-    p.add_argument("--directport", type=int, default=49999, help="The default port for iperf3 baseline (default: 49999)")
-    p.add_argument("--rsyncport", type=int, default=49998, help="The default port for rsync (default: 49998)")
-    #p.add_argument("--port", type=int, default=49998, help="The default port")
+    p.add_argument("--userhost", type=str, default="localhost", help="The host name where the command will execute")
+    p.add_argument("--remote-user", type=str, default="ubuntu", help="The remot user name on the nodes")
+    p.add_argument("--initiator-ap", type=str, default="neat-guy", help="Access point initiator host name")
+    p.add_argument("--listener-ap", type=str, default="that-guy", help="Access point listener host name")
+    p.add_argument("--initiator-ep", type=str, default="swell-guy", help="Endpoint initiator host name")
+    p.add_argument("--listener-ep", type=str, default="this-guy", help="Endpoint listener host name")
+    p.add_argument("--listener-ip",  type=str, default="128.135.24.117", help="The IP address of the listener (default: 192.168.10.10)") # default="10.52.2.167"
+    p.add_argument("--initiator-ip",  type=str, default="128.135.37.240", help="The IP address of the initiator (default: 192.168.20.10)") # default="10.52.2.167"
+    p.add_argument("--tunnel-port", type=int, default=50000, help="The default port for iperf3 through the tunnel (default: 50000)")
+    p.add_argument("--direct-port", type=int, default=49999, help="The default port for iperf3 baseline (default: 49999)")
+    p.add_argument("--rsync-port", type=int, default=49998, help="The default port for rsync (default: 49998)")
     p.add_argument("--sleep", type=int, default=10, help="DEBUG: Sleep time between between the commands (default: 10)")
 
     p.add_argument("--app", "-a", type=_parse_str_list, required=True, help="Application (iperf | base | rsync)")
@@ -108,33 +113,42 @@ TRANSFER = Config(
     test=args.test,
 
     # hosts
-    localhost="localhost",
+    localhost=args.localhost,
+    # hosts=Hosts(
+    #     ap={
+    #         "initiator": args.initiator_ap,
+    #         "listener": args.listener_ap,
+    #     },
+    #     ep={
+    #         "initiator": args.initiator_ep,
+    #         "listener": args.listener_ep,
+    #     },
+    # ),
     hosts=Hosts(
         ap={"initiator": "fab-c2cs", "listener": "fab-p2cs"},
         ep={"initiator": "fab-cons", "listener": "fab-prod"},
     ),
     listener_ip=args.listener_ip,
     initiator_ip=args.initiator_ip,
-    tunnel_port=args.tunnelport,
-    direct_port=args.directport,
-    rsync_port=args.rsyncport,
-    #port=args.rsyncport,
+    tunnel_port=args.tunnel_port,
+    direct_port=args.direct_port,
+    rsync_port=args.rsync_port,
     sleep=args.sleep,
 
     # test configuration
-    app=args.app,   #"iperf",
+    app=args.app,
     encrypt=args.encrypt,
     splice=args.splice,
     parallels=args.parallel,
-    time_frames=args.time,  #20,
+    time_frames=args.time,
     file_sizes=args.size,
     blocks=args.blocks,
     run_num=args.run,
 
     # envs / paths
     local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()),
-    remote_env="/home/ubuntu/streams-cli/bin/activate",
-    report_dir=args.output, #"/tmp",
+    remote_env=f"/home/{args.remote_user}/streams-cli/bin/activate",
+    report_dir=args.output,
 )
 
 STREAM = Config(
@@ -142,34 +156,43 @@ STREAM = Config(
     test=args.test,
     lease=args.lease,
 
-    # ghosts
-    localhost="localhost",
+    # hosts
+    localhost=args.localhost,
+    # hosts=Hosts(
+    #     ap={
+    #         "initiator": args.initiator_ap,
+    #         "listener": args.listener_ap,
+    #     },
+    #     ep={
+    #         "initiator": args.initiator_ep,
+    #         "listener": args.listener_ep,
+    #     },
+    # ),
     hosts=Hosts(
         ap={"initiator": "fab-consap", "listener": "fab-prodap"},
         ep={"initiator": "fab-consep", "listener": "fab-prodep"},
     ),
     listener_ip=args.listener_ip,
     initiator_ip=args.initiator_ip,
-    tunnel_port=args.tunnelport,
-    direct_port=args.directport,
-    rsync_port=args.rsyncport,
-    #port=args.rsyncport,
+    tunnel_port=args.tunnel_port,
+    direct_port=args.direct_port,
+    rsync_port=args.rsync_port,
     sleep=args.sleep,
 
     # test configuration
-    app=args.app,   #"iperf",
+    app=args.app,
     encrypt=args.encrypt,
     splice=args.splice,
     parallels=args.parallel,
-    time_frames=args.time,  #20,
+    time_frames=args.time,
     file_sizes=args.size,
     blocks=args.blocks,
     run_num=args.run,
 
     # envs / paths
     local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()),
-    report_dir=args.output, #"/tmp",
-    remote_env="/home/ubuntu/streams-cli/bin/activate",
+    remote_env=f"/home/{args.remote_user}/streams-cli/bin/activate",
+    report_dir=args.output, 
 )
 
 TEST = STREAM if args.test == "stream" else TRANSFER

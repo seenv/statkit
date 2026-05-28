@@ -127,41 +127,45 @@ def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file
 
 def experiment_main(cfg: Config) -> None:
     
-    parallels = cfg.parallels if cfg.test == "stream" else [1]
-    args = cfg.time_frames if cfg.test == "streams" else cfg.file_sizes
-    splices = cfg.splice
     blocks = cfg.blocks
+    parallels = cfg.parallels if cfg.test == "stream" else [1]
+    args = cfg.time_frames if cfg.test == "stream" else cfg.file_sizes
+    splices = cfg.splice
+    encrypts = cfg.encrypt
     runs = cfg.run_num
+
     test_config = (
-        (splice, block, parallel, arg, run)
-        for splice in splices
+        (block, parallel, arg, splice, encrypt, run)
         for block in blocks
         for parallel in parallels
         for arg in args
+        for splice in splices
+        for encrypt in encrypts
         for run in range(1, runs + 1)
     )
-    last_block, last_splice = None, None
-    total_runs = len(splices) * len(blocks) * len(parallels) * len(args) * runs
+
+    last_block, last_splice, last_encrypt= None, None, None
+    total_runs =  len(blocks) * len(parallels) * len(args) * len(splices) * len(encrypts) * runs
     
     logging.info("SYS: Recording the system reports")
     system_state_report(cfg, cfg.report_dir)
 
-    for idx, (splice, block, parallel, arg, run) in enumerate(test_config, start=1):
+    for idx, (block, parallel, arg, splice, encrypt, run) in enumerate(test_config, start=1):
         print("\n")
         logging.info(
-            "--------------- Tests: %d / %d : splice %s / blocksize %s / arg %s / run %s ---------------",
-            idx, total_runs, splice, block, arg, run)
+            "--------------- Tests: %d / %d : blocksize %s / arg %s / splice %s / encrypt: %s / run %s ---------------",
+            idx, total_runs, block, arg, splice, encrypt, run)
 
         if cfg.test == "transfer":
-            output_dir = f"{cfg.report_dir}/A{splice}/B{block}/P{parallel}/S{arg}/R{run}"
+            output_dir = f"{cfg.report_dir}/B{block}/P{parallel}/S{arg}/A{splice}/E{encrypt}/R{run}"
         elif cfg.test == "stream":
-            output_dir = f"{cfg.report_dir}/A{splice}/B{block}/P{parallel}/T{arg}/R{run}"
-        timeout = (arg * 120) #if cfg.test == "transfer" else (duration * 120)
+            output_dir = f"{cfg.report_dir}/B{block}/P{parallel}/T{arg}/A{splice}/E{encrypt}/R{run}"
+        timeout = (arg * 120)
 
-        if block != last_block or splice != last_splice:
-            logging.info("Applying GridFTP configuration: splice: %s and blocksize: %sM", splice, block)
-            gridftp_config(cfg, block, splice)
-            last_block, last_splice = block, splice
+        if block != last_block or splice != last_splice or encrypt != last_encrypt:
+            logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
+            gridftp_config(cfg, block, splice, encrypt)
+            last_block, last_splice, last_encrypt= block, splice, encrypt
 
         temp_file = f"{arg}G.bin"
         if cfg.test == "transfer":

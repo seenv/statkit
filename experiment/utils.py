@@ -168,7 +168,6 @@ def send_ntfy(success: bool, cfg: Config, error: Exception | None = None) -> Non
 # Helpers:
 def make_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/temp_files") -> None:
     host = cfg.hosts.ep.get("listener")
-    #for host in cfg.hosts.ep.values():
     cp = run_subprocess(
         host, None,
         f"mkdir -p {shlex.quote(file_path)} && "
@@ -200,7 +199,6 @@ def _parse_uid(output: str) -> str:
     raise RuntimeError(f"Could not find UUID in output:\n{output}")
 
 def _parse_gateway_uid(output: str,  parts: list[str], *, exact: bool = False) -> str:
-    #want = name.strip()
     for line in output.splitlines():
         if "|" not in line:
             continue
@@ -228,16 +226,17 @@ def _parse_contact_port(output: str) -> int:
     return int(m.group("port"))
 
 
-def gridftp_config(cfg: Config, blk: int, awai:int, check: bool = True) -> None:
+def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, check: bool = True) -> None:
     for host in cfg.hosts.ap.values():
         cp = run_subprocess(
             host, None,
             f"sudo sed -i -E "
             f"-e 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' "
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|$AWAI_SPLICE_ROUTING {awai}|' "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|$AWAI_WAN_ENCRYPTION {encr}|' "
             #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}|' "
             f"/etc/gridftp.d/zdebug; "
-            f"cat /etc/gridftp.d/zdebug ",
+            f"sudo cat /etc/gridftp.d/zdebug ",
             localhost=cfg.localhost
         )
         if check and cp.returncode != 0:
@@ -444,7 +443,7 @@ def restart_gridftp(cfg: Config, check: bool = True) -> None:
     for host in cfg.hosts.ap.values():
         cp = run_subprocess(
             host, None,
-            #"sudo systemctl restart apache2.service "
+            "sudo systemctl restart apache2.service "
             "sudo systemctl restart gridftp-server-restarter.service ",
             localhost=cfg.localhost,
         )
