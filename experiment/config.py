@@ -114,19 +114,15 @@ TRANSFER = Config(
 
     # hosts
     localhost=args.userhost,
-    # hosts=Hosts(
-    #     ap={
-    #         "initiator": args.initiator_ap,
-    #         "listener": args.listener_ap,
-    #     },
-    #     ep={
-    #         "initiator": args.initiator_ep,
-    #         "listener": args.listener_ep,
-    #     },
-    # ),
     hosts=Hosts(
-        ap={"initiator": "fab-c2cs", "listener": "fab-p2cs"},
-        ep={"initiator": "fab-cons", "listener": "fab-prod"},
+        ap={
+            "initiator": args.initiator_ap,
+            "listener": args.listener_ap,
+        },
+        ep={
+            "initiator": args.initiator_ep,
+            "listener": args.listener_ep,
+        },
     ),
     listener_ip=args.listener_ip,
     initiator_ip=args.initiator_ip,
@@ -158,19 +154,15 @@ STREAM = Config(
 
     # hosts
     localhost=args.userhost,
-    # hosts=Hosts(
-    #     ap={
-    #         "initiator": args.initiator_ap,
-    #         "listener": args.listener_ap,
-    #     },
-    #     ep={
-    #         "initiator": args.initiator_ep,
-    #         "listener": args.listener_ep,
-    #     },
-    # ),
     hosts=Hosts(
-        ap={"initiator": "fab-consap", "listener": "fab-prodap"},
-        ep={"initiator": "fab-consep", "listener": "fab-prodep"},
+        ap={
+            "initiator": args.initiator_ap,
+            "listener": args.listener_ap,
+        },
+        ep={
+            "initiator": args.initiator_ep,
+            "listener": args.listener_ep,
+        },
     ),
     listener_ip=args.listener_ip,
     initiator_ip=args.initiator_ip,
