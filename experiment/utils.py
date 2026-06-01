@@ -677,7 +677,7 @@ def base_start_iperf_server(cfg: Config, host: str, port: int, file: str, app: s
 
 
 def base_start_iperf_client(
-    cfg: Config, host: str, listener_ip: str, port: int, parallel: int, arg: int, 
+    cfg: Config, host: str, listener_pub: str, port: int, parallel: int, arg: int, 
     file: str, app: str, out_dir: str, timeout: int, temp_dir: str = "/tmp/temp_files", check: bool = True
     ) -> subprocess.CompletedProcess[str]:  
     extra_arg = f"-Z -R -n {arg}G -F {shlex.quote(temp_dir)}/{shlex.quote(file)} " if cfg.test == "transfer" else f"-P {parallel} -i 10 -O 10 -Z -R -t {arg} "
@@ -685,7 +685,7 @@ def base_start_iperf_client(
         host, cfg.remote_env,
         f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
-        f"iperf3 -c {listener_ip} -p {port} --timestamps --forceflush "
+        f"iperf3 -c {listener_pub} -p {port} --timestamps --forceflush "
         f"{extra_arg} "
         f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
         localhost=cfg.localhost,
@@ -740,7 +740,8 @@ def start_rsync_transfer(
     cfg: Config, src_host: str, dst_host: str, file: str, out_dir: str, port: int, timeout: int,
     module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
     ) -> None:
-    rsync_url = f"rsync://{cfg.initiator_ip}:{port}/{module_name}/{file}"
+    #rsync_url = f"rsync://{cfg.initiator_ip}:{port}/{module_name}/{file}"
+    rsync_url = f"rsync://{cfg.initiator_pub}:{port}/{module_name}/{file}"
     cp = run_subprocess(
         src_host, None, 
         f"set +x; mkdir -p {shlex.quote(out_dir)} && "

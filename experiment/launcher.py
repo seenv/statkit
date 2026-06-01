@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 
 from config import Config
 
@@ -84,13 +85,15 @@ def run_iperf_baseline(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         time.sleep(cfg.sleep)           # it takes more for them to initiates! TODO: find a better way
         # run iperf client
         logging.info("BASE: Starting iperf client")
-        base_start_iperf_client(cfg, initiator_host, cfg.listener_ip, port, parallel, arg, temp_file, "iperf_base", output_dir, timeout)    
+        #base_start_iperf_client(cfg, initiator_host, cfg.listener_ip, port, parallel, arg, temp_file, "iperf_base", output_dir, timeout)
+        base_start_iperf_client(cfg, initiator_host, cfg.listener_pub, port, parallel, arg, temp_file, "iperf_base", output_dir, timeout)    
         logging.info("BASE: Recording the RTT")
-        record_ping(cfg, initiator_host, cfg.listener_ip, "iperf_base", output_dir)
-        
+        #record_ping(cfg, initiator_host, cfg.listener_ip, "iperf_base", output_dir)
+        record_ping(cfg, initiator_host, cfg.listener_pub, "iperf_base", output_dir)
+
     except Exception as e:
         raise RuntimeError(f"BASE ERROR: {e}") from e
-    
+
     finally:
         logging.info("BASE: Stopping the statkit monitoring on the hosts")
         stop_statkit(cfg)
@@ -115,7 +118,7 @@ def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file
             cfg, listener_host, initiator_host, temp_file, output_dir, cfg.rsync_port, timeout,
             cfg.test, "/tmp/temp_files")
         logging.info("RSYNC: Recording RTT")        # it will run on the client
-        record_ping(cfg, initiator_host, cfg.listener_ip, "rsync", output_dir)
+        record_ping(cfg, initiator_host, cfg.listener_pub, "rsync", output_dir)
 
     except Exception as e:
         raise RuntimeError(f"RSYNC ERROR: {e}") from e
@@ -148,7 +151,8 @@ def experiment_main(cfg: Config) -> None:
     total_runs =  len(blocks) * len(parallels) * len(args) * len(splices) * len(encrypts) * runs
     
     logging.info("SYS: Recording the system reports")
-    system_state_report(cfg, cfg.report_dir)
+    sys_report_dir = str(Path(cfg.report_dir) / "sys-info")
+    system_state_report(cfg, sys_report_dir)
 
     for idx, (block, parallel, arg, splice, encrypt, run) in enumerate(test_config, start=1):
         print("\n")
@@ -157,9 +161,16 @@ def experiment_main(cfg: Config) -> None:
             idx, total_runs, block, arg, splice, encrypt, run)
 
         if cfg.test == "transfer":
-            output_dir = f"{cfg.report_dir}/B{block}/P{parallel}/S{arg}/A{splice}/E{encrypt}/R{run}"
+            #output_dir = f"{cfg.report_dir}/B{block}/P{parallel}/S{arg}/A{splice}/E{encrypt}/R{run}"
+            output_path = Path(cfg.report_dir) / f"B{block}" / f"P{parallel}" / f"S{arg}" / f"A{splice}" / f"E{encrypt}" / f"R{run}"
+            output_dir = str(output_path)
+            temp_file = f"{arg}G.bin"
+            make_file(cfg, arg, temp_file)
         elif cfg.test == "stream":
-            output_dir = f"{cfg.report_dir}/B{block}/P{parallel}/T{arg}/A{splice}/E{encrypt}/R{run}"
+            #output_dir = f"{cfg.report_dir}/B{block}/P{parallel}/T{arg}/A{splice}/E{encrypt}/R{run}"
+            output_path = Path(cfg.report_dir) / f"B{block}" / f"P{parallel}" / f"T{arg}" / f"A{splice}" / f"E{encrypt}" / f"R{run}"
+            output_dir = str(output_path)
+            temp_file = None
         timeout = (arg * 120)
 
         if block != last_block or splice != last_splice or encrypt != last_encrypt:
@@ -167,9 +178,9 @@ def experiment_main(cfg: Config) -> None:
             gridftp_config(cfg, block, splice, encrypt)
             last_block, last_splice, last_encrypt= block, splice, encrypt
 
-        temp_file = f"{arg}G.bin"
-        if cfg.test == "transfer":
-            make_file(cfg, arg, temp_file)
+        # temp_file = f"{arg}G.bin"
+        # if cfg.test == "transfer":
+        #     make_file(cfg, arg, temp_file)
 
         logging.info("GFTP: Recording the Gridftp configuration")
         gridftp_report(cfg, output_dir)
@@ -179,7 +190,8 @@ def experiment_main(cfg: Config) -> None:
             run_iperf_gst(
                 cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
                 parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.tunnel_port,
-                listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"), 
+                #listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"), 
+                listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 output_dir=output_dir,
             )
             time.sleep(cfg.sleep)
@@ -188,7 +200,8 @@ def experiment_main(cfg: Config) -> None:
             run_iperf_baseline(
                 cfg, idx=idx, total_runs=total_runs, timeout=timeout,
                 parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.direct_port,
-                listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"),
+                #listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"),
+                listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 output_dir=output_dir,
             )
             time.sleep(cfg.sleep)
@@ -196,7 +209,8 @@ def experiment_main(cfg: Config) -> None:
         if "rsync" in cfg.app:
             run_rsync(
                 cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
-                listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"),
+                #listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"),
+                listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 output_dir=output_dir,
             )
             time.sleep(cfg.sleep)

@@ -1,71 +1,53 @@
 """
-Main configuration file with experiments variables
+Main configuration file for experiment variables.
 """
+
 from __future__ import annotations
 
-import getpass
-import os, sys
-from datetime import datetime
-from os.path import expanduser
-from pathlib import Path
 import argparse
-import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, Mapping, Sequence, cast
 
 
-from dataclasses import dataclass, field
-from typing import Sequence, TypedDict, Literal, Dict, Mapping
+Role = Literal["initiator", "listener"]
+TestMode = Literal["stream", "transfer"]
 
-#from utils import _parse_list, _parse_int_list
-
-# TODO: all the hardcoded stuff :/
-
-# def _parse_flag(flag: str, default: bool = False) -> bool:
-#     return flag in sys.argv if sys.argv else default
 
 def _parse_int_list(s: str) -> list[int]:
     try:
-        return [int(x.strip()) for x in s.split(",") if x.strip()]
+        values = [int(x.strip()) for x in s.split(",") if x.strip()]
     except ValueError as e:
-        raise argparse.ArgumentTypeError(f"Invalid int list: {s}") from e
+        raise argparse.ArgumentTypeError(f"Invalid integer list: {s}") from e
+
+    if not values:
+        raise argparse.ArgumentTypeError("Integer list cannot be empty")
+
+    return values
+
 
 def _parse_str_list(s: str) -> list[str]:
-    try:
-        return [str(x.strip()) for x in s.split(",") if x.strip()]
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(f"Invalid str list: {s}") from e
+    values = [x.strip() for x in s.split(",") if x.strip()]
 
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--verbose", "-v", action="store_true", default=False)
-    p.add_argument("--lease", type=str, required=True, help="Lease name on the testbed")
-    p.add_argument("--test", type=str, required=True, choices=["stream", "transfer"], help="Experimet / test to perform (stream | transfer)")
-    
-    p.add_argument("--userhost", type=str, default="localhost", help="The host name where the command will execute")
-    p.add_argument("--remote-user", type=str, default="ubuntu", help="The remot user name on the nodes")
-    p.add_argument("--initiator-ap", type=str, default="neat-guy", help="Access point initiator host name")
-    p.add_argument("--listener-ap", type=str, default="that-guy", help="Access point listener host name")
-    p.add_argument("--initiator-ep", type=str, default="swell-guy", help="Endpoint initiator host name")
-    p.add_argument("--listener-ep", type=str, default="this-guy", help="Endpoint listener host name")
-    p.add_argument("--listener-ip",  type=str, default="128.135.24.117", help="The IP address of the listener (default: 192.168.10.10)") # default="10.52.2.167"
-    p.add_argument("--initiator-ip",  type=str, default="128.135.37.240", help="The IP address of the initiator (default: 192.168.20.10)") # default="10.52.2.167"
-    p.add_argument("--tunnel-port", type=int, default=50000, help="The default port for iperf3 through the tunnel (default: 50000)")
-    p.add_argument("--direct-port", type=int, default=49999, help="The default port for iperf3 baseline (default: 49999)")
-    p.add_argument("--rsync-port", type=int, default=49998, help="The default port for rsync (default: 49998)")
-    p.add_argument("--sleep", type=int, default=10, help="DEBUG: Sleep time between between the commands (default: 10)")
+    if not values:
+        raise argparse.ArgumentTypeError("String list cannot be empty")
 
-    p.add_argument("--app", "-a", type=_parse_str_list, required=True, help="Application (iperf | base | rsync)")
-    p.add_argument("--encrypt", type=_parse_int_list, default= [0], help="Enabling tunnel encryption (default: 0 | 0: disable | 1: enable)")
-    p.add_argument("--splice", type=_parse_int_list, default= [1], help="Enabling splice splice (default: 1 | 0: disable | 1: enable)")
-    p.add_argument("--parallel", "-P", type=_parse_int_list, default= [1], help="Parallel streams value; only in globus test(default: 1)")
-    p.add_argument("--time", "-t", type=_parse_int_list, default=[5], help="Duration of each stream in second; only in globus test (default: 5s)")
-    p.add_argument("--size", "-n", type=_parse_int_list, default=[1], help="File size to transfer in Gigabyte; only in transfer test (default: 1G)")
-    p.add_argument("--blocks", "-b", type=_parse_int_list, default=[32], help="Gridftp blocksize (default: 32)")
-    p.add_argument("--run", "-r", type=int, default=1, help="Total tests per each config")
-    p.add_argument("--output", "-o", type=str, default="/tmp", help="Log file's base path (remote)")
-    return p.parse_args()
+    return values
 
-args = parse_args()
-Role = Literal["initiator", "listener"]
+
+def _parse_app_list(s: str) -> list[str]:
+    valid_apps = {"iperf", "base", "rsync"}
+    apps = _parse_str_list(s)
+
+    invalid = sorted(set(apps) - valid_apps)
+    if invalid:
+        raise argparse.ArgumentTypeError(
+            f"Invalid app(s): {', '.join(invalid)}. "
+            f"Valid choices: {', '.join(sorted(valid_apps))}"
+        )
+
+    return apps
+
 
 @dataclass(frozen=True)
 class Hosts:
@@ -74,23 +56,23 @@ class Hosts:
 
 @dataclass(frozen=True)
 class Config:
-    # test params
     verbose: bool
     lease: str
-    test: str
+    test: TestMode
 
-    # hosts
     localhost: str
     hosts: Hosts
     listener_ip: str
+    listener_pub: str
     initiator_ip: str
+    initiator_pub: str
+
     tunnel_port: int
     direct_port: int
     rsync_port: int
-    #port: int
+
     sleep: int
-    
-    # test configuration
+
     app: Sequence[str]
     encrypt: Sequence[int]
     splice: Sequence[int]
@@ -100,91 +82,96 @@ class Config:
     blocks: Sequence[int]
     run_num: int
 
-    # envs / paths
     local_env: str
     remote_env: str
     report_dir: str
 
 
-TRANSFER = Config(
-    # test params
-    verbose=args.verbose,
-    lease=args.lease,
-    test=args.test,
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run stream or transfer experiments.")
+    parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--lease", required=True, help="Lease name on the testbed")
+    parser.add_argument("--test", required=True, choices=["stream", "transfer"], help="Experiment/test to perform")
+    parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
+    parser.add_argument("--remote-user", default="ubuntu", help="Remote username on the nodes")
 
-    # hosts
-    localhost=args.userhost,
-    hosts=Hosts(
-        ap={
-            "initiator": args.initiator_ap,
-            "listener": args.listener_ap,
-        },
-        ep={
-            "initiator": args.initiator_ep,
-            "listener": args.listener_ep,
-        },
-    ),
-    listener_ip=args.listener_ip,
-    initiator_ip=args.initiator_ip,
-    tunnel_port=args.tunnel_port,
-    direct_port=args.direct_port,
-    rsync_port=args.rsync_port,
-    sleep=args.sleep,
+    parser.add_argument("--initiator-ap", default="neat-guy")
+    parser.add_argument("--listener-ap", default="that-guy")
+    parser.add_argument("--initiator-ep", default="swell-guy")
+    parser.add_argument("--listener-ep", default="this-guy")
 
-    # test configuration
-    app=args.app,
-    encrypt=args.encrypt,
-    splice=args.splice,
-    parallels=args.parallel,
-    time_frames=args.time,
-    file_sizes=args.size,
-    blocks=args.blocks,
-    run_num=args.run,
+    parser.add_argument("--listener-ip", default="128.135.24.117")
+    parser.add_argument("--listener-pub", default="10.191.131.177")
+    parser.add_argument("--initiator-ip", default="128.135.37.240")
+    parser.add_argument("--initiator-pub", default="10.191.129.103")
 
-    # envs / paths
-    local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()),
-    remote_env=f"/home/{args.remote_user}/streams-cli/bin/activate",
-    report_dir=args.output,
-)
+    parser.add_argument("--tunnel-port", type=int, default=50000)
+    parser.add_argument("--direct-port", type=int, default=49999)
+    parser.add_argument("--rsync-port", type=int, default=49998)
 
-STREAM = Config(
-    verbose=args.verbose,
-    test=args.test,
-    lease=args.lease,
+    parser.add_argument("--sleep", type=int, default=15)
 
-    # hosts
-    localhost=args.userhost,
-    hosts=Hosts(
-        ap={
-            "initiator": args.initiator_ap,
-            "listener": args.listener_ap,
-        },
-        ep={
-            "initiator": args.initiator_ep,
-            "listener": args.listener_ep,
-        },
-    ),
-    listener_ip=args.listener_ip,
-    initiator_ip=args.initiator_ip,
-    tunnel_port=args.tunnel_port,
-    direct_port=args.direct_port,
-    rsync_port=args.rsync_port,
-    sleep=args.sleep,
+    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,base,rsync")
+    parser.add_argument("--encrypt", type=_parse_int_list, default=[0])
+    parser.add_argument("--splice", type=_parse_int_list, default=[1])
+    parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])
+    parser.add_argument("--time", "-t", type=_parse_int_list, default=[10])
+    parser.add_argument("--size", "-n", type=_parse_int_list, default=[1])
+    parser.add_argument("--blocks", "-b", type=_parse_int_list, default=[32])
+    parser.add_argument("--run", "-r", type=int, default=1)
 
-    # test configuration
-    app=args.app,
-    encrypt=args.encrypt,
-    splice=args.splice,
-    parallels=args.parallel,
-    time_frames=args.time,
-    file_sizes=args.size,
-    blocks=args.blocks,
-    run_num=args.run,
+    parser.add_argument("--output", "-o", default="/tmp")
 
-    # envs / paths
-    local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()),
-    remote_env=f"/home/{args.remote_user}/streams-cli/bin/activate",
-    report_dir=args.output, 
-)
+    return parser.parse_args()
 
-TEST = STREAM if args.test == "stream" else TRANSFER
+
+def build_config(args: argparse.Namespace) -> Config:
+    is_stream = args.test == "stream"
+
+    return Config(
+        verbose=args.verbose,
+        lease=args.lease,
+        test=cast(TestMode, args.test),
+
+        localhost=args.userhost,
+        hosts=Hosts(
+            ap={
+                "initiator": args.initiator_ap,
+                "listener": args.listener_ap,
+            },
+            ep={
+                "initiator": args.initiator_ep,
+                "listener": args.listener_ep,
+            },
+        ),
+        listener_ip=args.listener_ip,
+        listener_pub=args.listener_pub,
+        initiator_ip=args.initiator_ip,
+        initiator_pub=args.initiator_pub,
+
+        tunnel_port=args.tunnel_port,
+        direct_port=args.direct_port,
+        rsync_port=args.rsync_port,
+
+        sleep=args.sleep,
+
+        app=args.app,
+        encrypt=args.encrypt,
+        splice=args.splice,
+        parallels=args.parallel,
+        time_frames=args.time if is_stream else [],
+        file_sizes=args.size if not is_stream else [],
+        blocks=args.blocks,
+        run_num=args.run,
+
+        local_env=str(
+            Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()
+        ),
+        remote_env=f"/home/{args.remote_user}/streams-cli/bin/activate",
+        report_dir=args.output,
+    )
+
+
+def get_config() -> Config:
+    args = parse_args()
+    return build_config(args)
