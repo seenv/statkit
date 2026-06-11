@@ -168,6 +168,7 @@ def send_ntfy(success: bool, cfg: Config, error: Exception | None = None) -> Non
 # Helpers:
 def make_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/temp_files") -> None:
     host = cfg.hosts.ep.get("listener")
+    #if ("iperf" in cfg.app or "rsync" in cfg.app) and "gtr" in cfg.app:
     cp = run_subprocess(
         host, None,
         f"mkdir -p {shlex.quote(file_path)} && "
@@ -198,7 +199,7 @@ def _parse_uid(output: str) -> str:
             pass
     raise RuntimeError(f"Could not find UUID in output:\n{output}")
 
-def _parse_gateway_uid(output: str,  parts: list[str], *, exact: bool = False) -> str:
+def _parse_gateway_id(output: str,  parts: list[str], *, exact: bool = False) -> str:
     for line in output.splitlines():
         if "|" not in line:
             continue
@@ -208,10 +209,9 @@ def _parse_gateway_uid(output: str,  parts: list[str], *, exact: bool = False) -
         display = line.split("|", 1)[0].strip()
         if not all(part in display for part in parts):
             continue
-
         m = _UUID_CANDIDATE.search(line)
         if not m:
-            raise RuntimeError(f"Matched name but no UUID found on line:\n{line}")
+            raise RuntimeError(f"Matched name but no ID found on line:\n{line}")
         return str(uuid.UUID(m.group(0)))
     raise RuntimeError(f"No gateway row matched name={parts!r}.\nOutput:\n{output}")
 
@@ -241,11 +241,11 @@ def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, check: bool = Tru
         )
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"GFTP: Failed changing the blocksize on {host.upper()}"
+                f"GTR: Failed changing the blocksize on {host.upper()}"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         head = "\n".join(cp.stdout.splitlines()[:5])
-        logging.debug("GFTP: Gridftp splice and blocksize config on %s:\n%s", host.upper(), head)
+        logging.debug("GTR: Gridftp splice and blocksize config on %s:\n%s", host.upper(), head)
 
 
 def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
@@ -258,10 +258,10 @@ def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
         )
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"GFTP: Failed changing the gridftp configuration on {host.upper()}"
+                f"GTR: Failed changing the gridftp configuration on {host.upper()}"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
-        logging.debug("GFTP: Recorded the Gridftp configuration on %s", host.upper())
+        logging.debug("GTR: Recorded the Gridftp configuration on %s", host.upper())
 
 
 def _sysctl_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
@@ -449,10 +449,10 @@ def restart_gridftp(cfg: Config, check: bool = True) -> None:
         )
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"GFTP: Failed restarting gridftp on {host.upper()}\n"
+                f"GTR: Failed restarting gridftp on {host.upper()}\n"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
-        logging.debug("GFTP: Restarted gridftp on %s (%s)", host.upper(), cp.stdout.strip())
+        logging.debug("GTR: Restarted gridftp on %s (%s)", host.upper(), cp.stdout.strip())
 
 
 def cleanup_iperf(cfg: Config, check: bool = True) -> None:
@@ -480,12 +480,276 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
                 f"IPERF: Failed getting the stream id on {host.upper()}\n"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
-        out[role] = _parse_gateway_uid(cp.stdout + "\n" + cp.stderr, [cfg.lease, role.capitalize()], exact=False)
+        out[role] = _parse_gateway_id(cp.stdout + "\n" + cp.stderr, [cfg.lease, role.capitalize()], exact=False)
         logging.debug("IPERF: Stream Gateway id on %s %s", host.upper(), cp.stdout.strip())
     missing = {"initiator", "listener"} - set(out.keys())
     if missing:
         raise RuntimeError(f"Missing stream ids for roles: {sorted(missing)}")
     return out
+
+
+def _parse_collection_uid(output: str,  parts: list[str], *, exact: bool = False) -> str:
+    for line in output.splitlines():
+        if "|" not in line:
+            continue
+        if line.strip().startswith("---"):
+            continue
+        # first column is Display Name
+        display = line.split("|", 1)[1].strip()
+        if not all(part in display for part in parts):
+            continue
+        m = _UUID_CANDIDATE.search(line)
+        if not m:
+            raise RuntimeError(f"Matched name but no ID found on line:\n{line}")
+        return str(uuid.UUID(m.group(0)))
+    raise RuntimeError(f"No collection row matched name={parts!r}.\nOutput:\n{output}")
+
+
+def get_collection_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
+    out: dict[Role, str] = {}
+    for role, host in cfg.hosts.ep.items():
+        cp = run_subprocess(host, None, "gcs collection list \n", localhost=cfg.localhost)
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"GTR: Failed getting the collection id on {host.upper()}\n"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+        out[role] = _parse_collection_uid(cp.stdout + "\n" + cp.stderr, [cfg.lease, role.capitalize()], exact=False)
+        logging.debug("GTR: Collection id on %s %s", host.upper(), cp.stdout.strip())
+    missing = {"initiator", "listener"} - set(out.keys())
+    if missing:
+        raise RuntimeError(f"Missing collection ids for roles: {sorted(missing)}")
+    return out
+
+
+def parse_size_to_bytes(size: str) -> int:
+    # s = str(size).strip().upper()
+    # units = {
+    #     "B": 1, "K": 1024, "KB": 1024,
+    #     "M": 1024**2, "MB": 1024**2, "G": 1024**3,
+    #     "GB": 1024**3, "T": 1024**4, "TB": 1024**4,
+    # }
+    # for unit in sorted(units, key=len, reverse=True):
+    #     if s.endswith(unit):
+    #         number = float(s[:-len(unit)])
+    #         return int(number * units[unit])
+    # return int(float(s))
+    return int(size) * (1024 ** 3)
+
+
+def start_globus_transfer(
+    cfg: Config, src_cid: str, dst_cid: str, label: str, 
+    # contact_port: int, parallel: int, 
+    size: int, 
+    encr: int, file: str, app: str, out_dir: str,  timeout: int,
+    # module_name: str = "transfer", module_path: str = "/tmp/temp_files", 
+    check: bool = True,
+    ) -> None:
+    extra_arg = f"--encrypt" if encr == 1 else ""
+    size_bytes = parse_size_to_bytes(size)
+    # cp = run_subprocess(
+    #     cfg.localhost, None,
+    #     f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+    #     f"SUBMISSION_ID=$(globus task generate-submission-id) && "
+    #     f"echo \"$SUBMISSION_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}_submission_id.txt && "
+    #     f"echo \"SUBMISSION_ID=$SUBMISSION_ID\" && "
+    #     f"{{echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
+    #     f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
+    #     f"globus transfer -v --submission-id \"$SUBMISSION_ID\" "
+    #     #f"--source-local-user cc --destination-local-user cc "
+    #     f"{shlex.quote(src_cid)}:{shlex.quote(file)} "
+    #     f"{shlex.quote(dst_cid)}:{shlex.quote(file)} "
+    #     f"--label {shlex.quote(label)} {extra_arg} "
+    #     f"--no-verify-checksum --fail-on-quota-errors "
+    #     f"--format json --jmespath task_id "
+    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_log.log; "
+    #     f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
+    #     f"}} 2>&1 | tr '\\r' '\\n' "
+    #     f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
+    #     f"| tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
+    #     f"globus task wait \"$SUBMISSION_ID\" && globus task show \"$SUBMISSION_ID\" ",
+    #     localhost=cfg.localhost,
+    #     timeout=timeout,
+    # )
+    
+#task_id="$(globus transfer $source_ep $dest_ep     --jmespath 'task_id' --format=UNIX     --batch my_file_batch.txt)"
+# echo "Waiting on 'globus transfer' task '$task_id'"
+# globus task wait "$task_id" --timeout 30
+# if [ $? -eq 0 ]; then
+#     echo "$task_id completed successfully";
+# else
+#     echo "$task_id failed!";
+# fi
+
+    cp = run_subprocess(
+        cfg.localhost, None,
+        f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+        f"SUBMISSION_ID=$(globus task generate-submission-id) && "
+        f"echo \"$SUBMISSION_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}_submission_id.txt && "
+        f"echo \"SUBMISSION_ID=$SUBMISSION_ID\" && "
+        f"echo \"START $(date '+%Y-%m-%d %H:%M:%S')\" | tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
+        f"globus transfer -v --submission-id \"$SUBMISSION_ID\" "
+        #f"--source-local-user cc --destination-local-user cc "
+        f"{shlex.quote(src_cid)}:{shlex.quote(file)} "
+        f"{shlex.quote(dst_cid)}:{shlex.quote(file)} "
+        f"--label {shlex.quote(label)} {extra_arg} "
+        f"--no-verify-checksum --fail-on-quota-errors "
+        f"--format unix --jmespath task_id --notify off "
+        f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt 2> {shlex.quote(out_dir)}/{shlex.quote(app)}_submit_stderr.log && "
+        f"TASK_ID=$(cat {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt | tr -d '\"[:space:]') && "
+        f"echo \"TASK_ID=$TASK_ID\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
+        f"globus task wait \"$TASK_ID\" 2>&1 | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
+        f"globus task show \"$TASK_ID\" "
+        f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_show.log && "
+        f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log",
+        localhost=cfg.localhost,
+        timeout=timeout,
+    )
+
+    # cp = run_subprocess(
+    #     cfg.localhost, None,
+    #     f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+    #     f"SUBMISSION_ID=$(globus task generate-submission-id) && "
+    #     f"echo \"$SUBMISSION_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}_submission_id.txt && "
+    #     f"echo \"SUBMISSION_ID=$SUBMISSION_ID\" && "
+    #     f"echo \"START $(date '+%Y-%m-%d %H:%M:%S')\" | tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
+
+    #     f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
+    #     f"globus transfer -v --submission-id \"$SUBMISSION_ID\" "
+    #     # f"--source-local-user cc --destination-local-user cc "
+    #     f"{shlex.quote(src_cid)}:{shlex.quote(file)} "
+    #     f"{shlex.quote(dst_cid)}:{shlex.quote(file)} "
+    #     f"--label {shlex.quote(label)} {extra_arg} "
+    #     f"--no-verify-checksum --fail-on-quota-errors "
+    #     f"--format unix --jmespath task_id --notify off "
+    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt "
+    #     f"2> {shlex.quote(out_dir)}/{shlex.quote(app)}_submit_stderr.log && "
+
+    #     f"TASK_ID=$(cat {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt | tr -d '\"[:space:]') && "
+    #     f"echo \"TASK_ID=$TASK_ID\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
+
+    #     # Log full task report every 1 second as JSON lines
+    #     f"TASK_REPORT_LOG={shlex.quote(out_dir)}/{shlex.quote(app)}_task_report.jsonl && "
+    #     f": > \"$TASK_REPORT_LOG\" && "
+    #     f"while true; do "
+    #     f"TS=$(date '+%Y-%m-%d %H:%M:%S'); "
+    #     f"REPORT=$(globus task show \"$TASK_ID\" -F json 2>> {shlex.quote(out_dir)}/{shlex.quote(app)}_poll_stderr.log) || true; "
+    #     f"STATUS=$(echo \"$REPORT\" | jq -r '.status // \"UNKNOWN\"'); "
+    #     f"echo \"$REPORT\" | jq -c --arg ts \"$TS\" '. + {{\"poll_timestamp\": $ts}}' >> \"$TASK_REPORT_LOG\"; "
+    #     f"echo \"$TS STATUS=$STATUS\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log; "
+    #     f"if [ \"$STATUS\" = \"SUCCEEDED\" ] || [ \"$STATUS\" = \"FAILED\" ] || [ \"$STATUS\" = \"INACTIVE\" ]; then "
+    #     f"break; "
+    #     f"fi; "
+    #     f"sleep 1; "
+    #     f"done && "
+
+    #     # Save final task report separately
+    #     f"globus task show \"$TASK_ID\" -F json "
+    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_show.json && "
+
+    #     # Optional: save task events/errors
+    #     f"globus task event-list \"$TASK_ID\" -F json "
+    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_events.json && "
+    #     f"globus task event-list \"$TASK_ID\" --filter-errors -F json "
+    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_errors.json && "
+
+    #     f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log",
+    #     localhost=cfg.localhost,
+    #     timeout=timeout,
+    # )
+
+    # cp = run_subprocess(
+    #     cfg.localhost, None,
+    #     f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+    #     f"SUBMISSION_ID=$(globus task generate-submission-id) && "
+    #     f"echo \"$SUBMISSION_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}_submission_id.txt && "
+    #     f"echo \"SUBMISSION_ID=$SUBMISSION_ID\" && "
+    #     f"echo \"START $(date '+%Y-%m-%d %H:%M:%S')\" | tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
+
+    #     f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
+    #     f"globus transfer -v --submission-id \"$SUBMISSION_ID\" "
+    #     # f"--source-local-user cc --destination-local-user cc "
+    #     f"{shlex.quote(src_cid)}:{shlex.quote(file)} "
+    #     f"{shlex.quote(dst_cid)}:{shlex.quote(file)} "
+    #     f"--label {shlex.quote(label)} {extra_arg} "
+    #     f"--no-verify-checksum --fail-on-quota-errors "
+    #     f"--format unix --jmespath task_id --notify off "
+    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt "
+    #     f"2> {shlex.quote(out_dir)}/{shlex.quote(app)}_submit_stderr.log && "
+
+    #     f"TASK_ID=$(cat {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt | tr -d '\"[:space:]') && "
+    #     f"echo \"TASK_ID=$TASK_ID\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
+    
+    #     f"TASK_REPORT_LOG={shlex.quote(out_dir)}/{shlex.quote(app)}_task_report.jsonl && "
+    #     f"PROGRESS_LOG={shlex.quote(out_dir)}/{shlex.quote(app)}_progress.tsv && "
+    #     f": > \"$TASK_REPORT_LOG\" && "
+    #     f"echo -e \"timestamp\\telapsed_sec\\tstatus\\tbytes_transferred\\tpercent\\teffective_Bps\\teffective_Mbps\\tinstant_Bps\\tinstant_Mbps\\tfiles\\tfiles_transferred\\tsubtasks_pending\\tsubtasks_succeeded\\tsubtasks_failed\" > \"$PROGRESS_LOG\" && "
+    #     f"START_EPOCH=$(date +%s) && "
+    #     f"LAST_EPOCH=$START_EPOCH && "
+    #     f"LAST_BYTES=0 && "
+    #     f"SIZE_BYTES={int(size_bytes)} && "
+
+    #     f"while true; do "
+    #     f"NOW_EPOCH=$(date +%s); "
+    #     f"ELAPSED=$((NOW_EPOCH - START_EPOCH)); "
+    #     f"TS=$(date '+%Y-%m-%d %H:%M:%S'); "
+    #     f"REPORT=$(globus task show \"$TASK_ID\" -F json 2>> {shlex.quote(out_dir)}/{shlex.quote(app)}_poll_stderr.log) || true; "
+
+    #     f"STATUS=$(echo \"$REPORT\" | jq -r '.status // \"UNKNOWN\"'); "
+    #     f"BYTES=$(echo \"$REPORT\" | jq -r '.bytes_transferred // 0'); "
+    #     f"EFF_BPS=$(echo \"$REPORT\" | jq -r '.effective_bytes_per_second // 0'); "
+    #     f"FILES=$(echo \"$REPORT\" | jq -r '.files // 0'); "
+    #     f"FILES_XFER=$(echo \"$REPORT\" | jq -r '.files_transferred // 0'); "
+    #     f"PENDING=$(echo \"$REPORT\" | jq -r '.subtasks_pending // 0'); "
+    #     f"SUCCEEDED=$(echo \"$REPORT\" | jq -r '.subtasks_succeeded // 0'); "
+    #     f"FAILED=$(echo \"$REPORT\" | jq -r '.subtasks_failed // 0'); "
+
+    #     f"PERCENT=$(awk -v b=\"$BYTES\" -v s=\"$SIZE_BYTES\" 'BEGIN {{ if (s > 0) printf \"%.2f\", 100*b/s; else print \"0.00\" }}'); "
+    #     f"EFF_MBPS=$(awk -v r=\"$EFF_BPS\" 'BEGIN {{ printf \"%.3f\", r*8/1000000 }}'); "
+
+    #     f"DT=$((NOW_EPOCH - LAST_EPOCH)); "
+    #     f"DB=$((BYTES - LAST_BYTES)); "
+    #     f"if [ \"$DT\" -gt 0 ]; then "
+    #     f"INST_BPS=$(awk -v db=\"$DB\" -v dt=\"$DT\" 'BEGIN {{ printf \"%.3f\", db/dt }}'); "
+    #     f"else "
+    #     f"INST_BPS=0; "
+    #     f"fi; "
+    #     f"INST_MBPS=$(awk -v r=\"$INST_BPS\" 'BEGIN {{ printf \"%.3f\", r*8/1000000 }}'); "
+
+    #     f"echo \"$REPORT\" | jq -c --arg ts \"$TS\" '. + {{\"poll_timestamp\": $ts}}' >> \"$TASK_REPORT_LOG\"; "
+    #     f"echo -e \"$TS\\t$ELAPSED\\t$STATUS\\t$BYTES\\t$PERCENT\\t$EFF_BPS\\t$EFF_MBPS\\t$INST_BPS\\t$INST_MBPS\\t$FILES\\t$FILES_XFER\\t$PENDING\\t$SUCCEEDED\\t$FAILED\" >> \"$PROGRESS_LOG\"; "
+    #     f"echo \"$TS STATUS=$STATUS BYTES=$BYTES PERCENT=$PERCENT EFF_Mbps=$EFF_MBPS INST_Mbps=$INST_MBPS\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log; "
+
+    #     f"LAST_EPOCH=$NOW_EPOCH; "
+    #     f"LAST_BYTES=$BYTES; "
+
+    #     f"if [ \"$STATUS\" = \"SUCCEEDED\" ] || [ \"$STATUS\" = \"FAILED\" ] || [ \"$STATUS\" = \"INACTIVE\" ]; then "
+    #     f"break; "
+    #     f"fi; "
+    #     f"sleep 1; "
+    #     f"done && "
+
+    #     # Save final task report separately
+    #     f"globus task show \"$TASK_ID\" -F json "
+    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_show.json && "
+
+    #     # Optional: save task events/errors
+    #     f"globus task event-list \"$TASK_ID\" -F json "
+    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_events.json && "
+    #     f"globus task event-list \"$TASK_ID\" --filter-errors -F json "
+    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_errors.json && "
+
+    #     f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log",
+    #     localhost=cfg.localhost,
+    #     timeout=timeout,
+    # )
+    logging.info(
+        "GTR: Completed globus transfer of %s from %s to rsync://%s:%s/%s/%s",
+        file, src_cid, dst_cid, file, app, file
+    )
+    logging.debug("GTR stdout:\n%s", cp.stdout)
+
 
 
 def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, lbl: str, check: bool = True) -> str:
@@ -519,15 +783,15 @@ def start_statkit(cfg: Config, timeout : int , app: str, out_dir: str, check: bo
             f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ", 
             localhost=cfg.localhost,
         )
-        logging.debug("IPERF: Started on statkit on %s %s", host.upper(), cp.stdout)
+        logging.debug("SYS: Started on statkit on %s %s", host.upper(), cp.stdout)
 
 
-def init_listener_env(cfg: Config, tunnel_id: str, check: bool = True) -> None:
+def init_listener_env(cfg: Config, listener_ip: str, tunnel_id: str, check: bool = True) -> None:
     host = cfg.hosts.ep["listener"]
     cp = run_subprocess(
         host, cfg.remote_env,
         "globus-streams environment initialize "
-        f"--listener-contact-string {cfg.listener_ip}:{cfg.tunnel_port} "
+        f"--listener-contact-string {listener_ip}:{cfg.tunnel_port} "
         f"{shlex.quote(tunnel_id)}",
         localhost=cfg.localhost,
     )
@@ -564,7 +828,7 @@ def stop_statkit(cfg: Config) -> None:
             r"pkill -TERM -f 'monitor/launcher\.py' || true",
             localhost=cfg.localhost,
         )
-        logging.debug("IPERF: Stopped statkit on %s", host.upper())
+        logging.debug("SYS: Stopped statkit on %s", host.upper())
 
 
 _STATE = re.compile(r"^\s*State:\s*(?P<state>\S+)\s*$", re.MULTILINE)
@@ -630,7 +894,8 @@ def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: 
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
         "globus-streams-launch "
         f"-p {port} {shlex.quote(tunnel_id)} "
-        f"iperf3 -s -p {port} -1  --timestamps  --forceflush "
+        f"iperf3 -s -p {port} -1 "
+        f"--timestamps  --forceflush "
         f"{extra_arg} "
         f"-J --logfile {out_dir}/{shlex.quote(app)}.json & "
         "echo $! " ,
@@ -642,14 +907,16 @@ def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: 
 def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, 
     parallel: int, arg: int, file: str, app: str, out_dir: str, timeout: int, 
     temp_dir: str = "/tmp/temp_files", check: bool = True) -> subprocess.CompletedProcess[str]:
-    extra_arg = f"-Z -R -n {arg}G -F {shlex.quote(temp_dir)}/{shlex.quote(file)} " if cfg.test == "transfer" else f"-P {parallel} -i 10 -O 10 -Z -R -t {arg} "
+    size = parse_size_to_bytes(arg)
+    extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
     cp = run_subprocess(
         host, cfg.remote_env,
         f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
         "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "
-        f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} --timestamps  --forceflush "
+        f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
+        f"-Z -R -P {parallel} --timestamps  --forceflush "
         f"{extra_arg} "
         f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
         localhost=cfg.localhost,
@@ -680,12 +947,13 @@ def base_start_iperf_client(
     cfg: Config, host: str, listener_pub: str, port: int, parallel: int, arg: int, 
     file: str, app: str, out_dir: str, timeout: int, temp_dir: str = "/tmp/temp_files", check: bool = True
     ) -> subprocess.CompletedProcess[str]:  
-    extra_arg = f"-Z -R -n {arg}G -F {shlex.quote(temp_dir)}/{shlex.quote(file)} " if cfg.test == "transfer" else f"-P {parallel} -i 10 -O 10 -Z -R -t {arg} "
+    extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {arg}G " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
     cp = run_subprocess(
         host, cfg.remote_env,
         f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
-        f"iperf3 -c {listener_pub} -p {port} --timestamps --forceflush "
+        f"iperf3 -c {listener_pub} -p {port} "
+        f"-Z -R -P {parallel} --timestamps --forceflush "
         f"{extra_arg} "
         f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
         localhost=cfg.localhost,
@@ -699,7 +967,7 @@ def base_start_iperf_client(
 
 def start_rsync_daemon(
     cfg: Config, dst_host: str, out_dir: str, port: int, timeout: int, 
-    module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
+    module_name: str = "transfer", module_path: str = "/tmp/temp_file", check: bool = True,
     ) -> None:
     cp = run_subprocess(
         dst_host, None,
@@ -738,7 +1006,7 @@ def start_rsync_daemon(
 
 def start_rsync_transfer(
     cfg: Config, src_host: str, dst_host: str, file: str, out_dir: str, port: int, timeout: int,
-    module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
+    module_name: str = "transfer", module_path: str = "/tmp/temp_file", check: bool = True,
     ) -> None:
     #rsync_url = f"rsync://{cfg.initiator_ip}:{port}/{module_name}/{file}"
     rsync_url = f"rsync://{cfg.initiator_pub}:{port}/{module_name}/{file}"

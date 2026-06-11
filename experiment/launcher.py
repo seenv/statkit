@@ -13,6 +13,7 @@ from utils import make_file, start_statkit, stop_statkit, cleanup_iperf
 from utils import start_iperf_server, start_iperf_client, system_state_report
 from utils import base_start_iperf_server, base_start_iperf_client
 from utils import start_rsync_daemon, start_rsync_transfer
+from utils import get_collection_id, start_globus_transfer
 
 
 def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
@@ -36,7 +37,7 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         time.sleep(cfg.sleep)
         # init listener env 
         logging.info("GST: Bringing up the tunnel on Listener AP")
-        init_listener_env(cfg, tunnel_id)
+        init_listener_env(cfg, cfg.listener_ip, tunnel_id)
         # waiting till the tunnel gets activated
         status_tunnel(cfg, tunnel_id, "ACTIVE")
         # init initiator env + discover contact port
@@ -52,10 +53,11 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         start_iperf_client(cfg, initiator_host, tunnel_id, contact_port, parallel, arg, temp_file, "iperf_gst", output_dir, timeout)
         # recording rtt
         logging.info("GST: Recording the RTT")
-        record_ping(cfg, initiator_host, cfg.listener_ip, "iperf_gst", output_dir)
-        
+        #record_ping(cfg, initiator_host, cfg.listener_ip, "iperf_gst", output_dir)
+        record_ping(cfg, initiator_host, cfg.listener_pub, "iperf_gst", output_dir)
+
     except Exception as e:
-        raise RuntimeError(f"EXPERIMENT ERROR: {e}") from e
+        raise RuntimeError(f"GST: Runtime Error: {e}") from e
 
     finally:
         # TODO: check why monitor finishes before transfer!
@@ -92,7 +94,7 @@ def run_iperf_baseline(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         record_ping(cfg, initiator_host, cfg.listener_pub, "iperf_base", output_dir)
 
     except Exception as e:
-        raise RuntimeError(f"BASE ERROR: {e}") from e
+        raise RuntimeError(f"BASE: Runtime Error: {e}") from e
 
     finally:
         logging.info("BASE: Stopping the statkit monitoring on the hosts")
@@ -103,12 +105,11 @@ def run_iperf_baseline(cfg: Config, *, idx: int, total_runs: int, timeout: int,
 def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
     listener_host: str, initiator_host: str, output_dir: str) -> None:
     print("\n")
-    logging.info("----- Test %d / %d: starting rsync test -----", idx, total_runs)
+    logging.info("----- Test %d / %d: Starting RSync Test -----", idx, total_runs)
     try:
         logging.info("RSYNC: Starting statkit monitoring")
         start_statkit(cfg, timeout, "rsync", output_dir)   #size as duration which will be * 60s
         time.sleep(cfg.sleep)
-        
         logging.info("RSYNC: Starting the rsync deamon on the host %s", initiator_host.upper())
         start_rsync_daemon(
             cfg, initiator_host, output_dir, cfg.rsync_port, timeout,
@@ -118,18 +119,56 @@ def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file
             cfg, listener_host, initiator_host, temp_file, output_dir, cfg.rsync_port, timeout,
             cfg.test, "/tmp/temp_files")
         logging.info("RSYNC: Recording RTT")        # it will run on the client
-        record_ping(cfg, initiator_host, cfg.listener_pub, "rsync", output_dir)
+        #record_ping(cfg, initiator_host, cfg.listener_ip, "iperf_gst", output_dir)
+        record_ping(cfg, initiator_host, cfg.listener_pub, "iperf_gst", output_dir)
 
     except Exception as e:
-        raise RuntimeError(f"RSYNC ERROR: {e}") from e
+        raise RuntimeError(f"RSYNC: Runtime Error: {e}") from e
 
     finally:
         logging.info("RSYNC: Stopping statkit monitoring")
         stop_statkit(cfg)
 
 
+def run_globus_transfer(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
+    listener_host: str, initiator_host: str, output_dir: str, 
+    arg: int, 
+    encrypt: int
+    ) -> None:
+    print("\n")
+    logging.info("----- Tests: %d / %d ------- Strarting Globus Transfer Tests", idx, total_runs)
+    ids = get_collection_id(cfg)
+    initiator_collection_id, listener_collection_id = ids["initiator"], ids["listener"]
+    transfer_label = f"{cfg.lease.replace(' ', '_')}-{cfg.test.replace(' ', '_')}-idx{idx}-tot{total_runs}"
+    try:
+        # launch statkit
+        logging.info("GTR: Starting the statkit monitoring on the hosts")
+        start_statkit(cfg, timeout, "globus_gtr", output_dir)   #size as duration which will be * 60s
+        time.sleep(cfg.sleep)
+        # start globus transfer
+        logging.info("GTR: Starting globus transfer")
+        start_globus_transfer(cfg, listener_collection_id, initiator_collection_id, transfer_label, 
+        arg, encrypt, temp_file, "globus_gtr", output_dir, timeout)
+        # recording rtt
+        logging.info("GTR: Recording the RTT")
+        record_ping(cfg, initiator_host, cfg.listener_pub, "iperf_gst", output_dir)
+        
+    except Exception as e:
+        raise RuntimeError(f"GTR: Runtime Error: {e}") from e
+
+    finally:
+        # TODO: check why monitor finishes before transfer!
+        logging.info("GTR: Stopping the statkit monitoring on the hosts")
+        # cleanup_iperf(cfg)
+        stop_statkit(cfg)
+        # stop_tunnel(cfg, tunnel_id)
+        # status_tunnel(cfg, tunnel_id, "STOPPED")
+        # delete_tunnel(cfg, tunnel_id)
+        #restart_gridftp(cfg)
+
+
+
 def experiment_main(cfg: Config) -> None:
-    
     blocks = cfg.blocks
     parallels = cfg.parallels if cfg.test == "stream" else [1]
     args = cfg.time_frames if cfg.test == "stream" else cfg.file_sizes
@@ -160,17 +199,16 @@ def experiment_main(cfg: Config) -> None:
             "--------------- Tests: %d / %d : blocksize %s / arg %s / splice %s / encrypt: %s / run %s ---------------",
             idx, total_runs, block, arg, splice, encrypt, run)
 
+        temp_file = f"{arg}G.bin"
         if cfg.test == "transfer":
             #output_dir = f"{cfg.report_dir}/B{block}/P{parallel}/S{arg}/A{splice}/E{encrypt}/R{run}"
             output_path = Path(cfg.report_dir) / f"B{block}" / f"P{parallel}" / f"S{arg}" / f"A{splice}" / f"E{encrypt}" / f"R{run}"
             output_dir = str(output_path)
-            temp_file = f"{arg}G.bin"
             make_file(cfg, arg, temp_file)
         elif cfg.test == "stream":
             #output_dir = f"{cfg.report_dir}/B{block}/P{parallel}/T{arg}/A{splice}/E{encrypt}/R{run}"
             output_path = Path(cfg.report_dir) / f"B{block}" / f"P{parallel}" / f"T{arg}" / f"A{splice}" / f"E{encrypt}" / f"R{run}"
             output_dir = str(output_path)
-            temp_file = None
         timeout = (arg * 120)
 
         if block != last_block or splice != last_splice or encrypt != last_encrypt:
@@ -182,7 +220,7 @@ def experiment_main(cfg: Config) -> None:
         # if cfg.test == "transfer":
         #     make_file(cfg, arg, temp_file)
 
-        logging.info("GFTP: Recording the Gridftp configuration")
+        logging.info("GTR: Recording the Gridftp configuration")
         gridftp_report(cfg, output_dir)
         time.sleep(cfg.sleep)
 
@@ -200,7 +238,6 @@ def experiment_main(cfg: Config) -> None:
             run_iperf_baseline(
                 cfg, idx=idx, total_runs=total_runs, timeout=timeout,
                 parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.direct_port,
-                #listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"),
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 output_dir=output_dir,
             )
@@ -209,8 +246,16 @@ def experiment_main(cfg: Config) -> None:
         if "rsync" in cfg.app:
             run_rsync(
                 cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
-                #listener_host=cfg.hosts.ep.get("listener"), initiator_host=cfg.hosts.ep.get("initiator"),
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 output_dir=output_dir,
+            )
+            time.sleep(cfg.sleep)
+
+        if "gtr" in cfg.app:
+            run_globus_transfer(
+                cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
+                listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                output_dir=output_dir, 
+                arg=arg, encrypt=encrypt,
             )
             time.sleep(cfg.sleep)

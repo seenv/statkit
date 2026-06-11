@@ -19,33 +19,27 @@ def _parse_int_list(s: str) -> list[int]:
         values = [int(x.strip()) for x in s.split(",") if x.strip()]
     except ValueError as e:
         raise argparse.ArgumentTypeError(f"Invalid integer list: {s}") from e
-
     if not values:
         raise argparse.ArgumentTypeError("Integer list cannot be empty")
-
     return values
 
 
 def _parse_str_list(s: str) -> list[str]:
     values = [x.strip() for x in s.split(",") if x.strip()]
-
     if not values:
         raise argparse.ArgumentTypeError("String list cannot be empty")
-
     return values
 
 
 def _parse_app_list(s: str) -> list[str]:
-    valid_apps = {"iperf", "base", "rsync"}
+    valid_apps = {"iperf", "base", "rsync", "gtr"}
     apps = _parse_str_list(s)
-
     invalid = sorted(set(apps) - valid_apps)
     if invalid:
         raise argparse.ArgumentTypeError(
             f"Invalid app(s): {', '.join(invalid)}. "
             f"Valid choices: {', '.join(sorted(valid_apps))}"
         )
-
     return apps
 
 
@@ -95,14 +89,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
     parser.add_argument("--remote-user", default="ubuntu", help="Remote username on the nodes")
 
-    parser.add_argument("--initiator-ap", default="neat-guy")
-    parser.add_argument("--listener-ap", default="that-guy")
-    parser.add_argument("--initiator-ep", default="swell-guy")
-    parser.add_argument("--listener-ep", default="this-guy")
+    parser.add_argument("--initiator-ap", default="chi-trans-consap")
+    parser.add_argument("--listener-ap", default="chi-trans-prodap")
+    parser.add_argument("--initiator-ep", default="chi-trans-consep")
+    parser.add_argument("--listener-ep", default="chi-trans-prodep")
 
-    parser.add_argument("--listener-ip", default="128.135.24.117")
+    parser.add_argument("--listener-ip", default="192.168.110.10")
     parser.add_argument("--listener-pub", default="10.191.131.177")
-    parser.add_argument("--initiator-ip", default="128.135.37.240")
+    parser.add_argument("--initiator-ip", default="192.168.120.10")
     parser.add_argument("--initiator-pub", default="10.191.129.103")
 
     parser.add_argument("--tunnel-port", type=int, default=50000)
@@ -111,7 +105,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--sleep", type=int, default=15)
 
-    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,base,rsync")
+    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,base,rsync,gtr")
     parser.add_argument("--encrypt", type=_parse_int_list, default=[0])
     parser.add_argument("--splice", type=_parse_int_list, default=[1])
     parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])

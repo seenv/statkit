@@ -24,13 +24,17 @@ def main() -> None:
             raise ValueError(f"Unknown test value: {cfg.test}")
     except Exception as e:
         #err = traceback.format_exc()
-        logging.exception("MAIN: Experiment failed")
+        logging.exception(
+            f"MAIN: Experiment failed: \n"
+            f"logfile: {log_path} \n"
+            )
         send_ntfy(success=False, cfg=cfg, error=e)
         raise
 
     send_ntfy(success=True, cfg=cfg)     
     print(
         f"\nFinished runing the experiment with vals: \n"
+        f"logfile: {log_path} \n"
         f"Lease: {cfg.lease} \n",
         f"Test: {cfg.test} \n",
         f"Apps: {cfg.app} \n",
