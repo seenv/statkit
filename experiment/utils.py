@@ -63,15 +63,25 @@ def is_ssh_failure(cp: subprocess.CompletedProcess[str]) -> bool:
     return any(x in stderr for x in needles)
 
 
+# def _env_wrap(cmd: str, env: Optional[str], discard: bool = False) -> str:
+#     prefix =  "set -euo pipefail >/dev/null 2>&1; set -x; " if not discard else "set -euo pipefail; set -x; "
+#     if env:
+#         act = shlex.quote(env)
+#         cmd = (f"{prefix} . {act} > /dev/null 2>&1; {cmd}")
+#     else:
+#         cmd = (f"{prefix} {cmd}")
+#     return cmd
 def _env_wrap(cmd: str, env: Optional[str], discard: bool = False) -> str:
-    prefix =  "set -euo pipefail >/dev/null 2>&1; set -x; " if not discard else "set -euo pipefail; set -x; "
+    prefix = (
+        "set -euo pipefail >/dev/null 2>&1; set -x; "
+        if not discard
+        else "set -euo pipefail; set -x; "
+    )
     if env:
-        act = shlex.quote(env)
-        cmd = (f"{prefix} . {act} > /dev/null 2>&1; {cmd}")
+        cmd = f"{prefix} . {env} > /dev/null 2>&1; {cmd}"
     else:
-        cmd = (f"{prefix} {cmd}")
+        cmd = f"{prefix} {cmd}"
     return cmd
-
 
 def _build_argv(host: str, env: Optional[str], cmd: str, localhost: str) -> list[str]:
     wrapped = _env_wrap(cmd, env)
