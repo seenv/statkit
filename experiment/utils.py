@@ -253,7 +253,7 @@ def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
         cp = run_subprocess(
             host, None,
             f"mkdir -p {shlex.quote(out_dir)} && "
-            f"sudo cat /etc/gridftp.d/zdebug > {shlex.quote(out_dir)}/gridftp.log ",
+            f"sudo cat /etc/gridftp.d/zdebug > {shlex.quote(out_dir)}/gridftp-stream.log ",
             localhost=cfg.localhost
         )
         if check and cp.returncode != 0:
@@ -262,6 +262,33 @@ def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         logging.debug("GTR: Recorded the Gridftp configuration on %s", host.upper())
+
+
+def logging_gridftp(cfg: Config, out_dir: str, check: bool = True) -> None:
+    audit_log = shlex.quote(f'{out_dir}/gridftp-audit.log')
+    single_log = shlex.quote(f'{out_dir}/gridftp-single.log')
+    transfer_log = shlex.quote(f'{out_dir}/gridftp-transfer.log')
+
+    #for host in cfg.hosts.ep.values():
+    hosts = list(cfg.hosts.ep.values())
+    #hosts.append(cfg.localhost)
+    for host in hosts:
+        cp = run_subprocess(
+            host,
+            None,
+            f"sudo sed -i -E "
+            f"-e \"s|^[[:space:]]*log_audit[[:space:]]+.*$|log_audit {audit_log}|\" "
+            f"-e \"s|^[[:space:]]*log_single[[:space:]]+.*$|log_single {single_log}|\" "
+            f"-e \"s|^[[:space:]]*log_transfer[[:space:]]+.*$|log_transfer {transfer_log}|\" "
+            f"/etc/gridftp.d/z_logging ; "
+            f"sudo cat /etc/gridftp.d/z_logging",
+            localhost=cfg.localhost,
+        )
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"GTR: Failed changing GridFTP logging paths on {host.upper()}\n"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
 
 
 def _sysctl_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
@@ -440,11 +467,14 @@ def system_state_report(cfg: Config, out_dir: str, check: bool = True) -> None:
 
 
 def restart_gridftp(cfg: Config, check: bool = True) -> None:
-    for host in cfg.hosts.ap.values():
+    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+    for host in hosts:
+    #for host in cfg.hosts.ap.values():
         cp = run_subprocess(
             host, None,
             "sudo systemctl restart apache2.service && "
-            "sudo systemctl restart gridftp-server-restarter.service ",
+            "sudo systemctl restart globus-gridftp-server.service ",
+            #"sudo systemctl restart gridftp-server-restarter.service ",
             localhost=cfg.localhost,
         )
         if check and cp.returncode != 0:
@@ -536,6 +566,14 @@ def parse_size_to_bytes(size: str) -> int:
     # return int(float(s))
     return int(size) * (1024 ** 3)
 
+#task_id="$(globus transfer $source_ep $dest_ep     --jmespath 'task_id' --format=UNIX     --batch my_file_batch.txt)"
+# echo "Waiting on 'globus transfer' task '$task_id'"
+# globus task wait "$task_id" --timeout 30
+# if [ $? -eq 0 ]; then
+#     echo "$task_id completed successfully";
+# else
+#     echo "$task_id failed!";
+# fi
 
 def start_globus_transfer(
     cfg: Config, src_cid: str, dst_cid: str, label: str, 
@@ -547,40 +585,6 @@ def start_globus_transfer(
     ) -> None:
     extra_arg = f"--encrypt" if encr == 1 else ""
     size_bytes = parse_size_to_bytes(size)
-    # cp = run_subprocess(
-    #     cfg.localhost, None,
-    #     f"set +x; mkdir -p {shlex.quote(out_dir)} && "
-    #     f"SUBMISSION_ID=$(globus task generate-submission-id) && "
-    #     f"echo \"$SUBMISSION_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}_submission_id.txt && "
-    #     f"echo \"SUBMISSION_ID=$SUBMISSION_ID\" && "
-    #     f"{{echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
-    #     f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
-    #     f"globus transfer -v --submission-id \"$SUBMISSION_ID\" "
-    #     #f"--source-local-user cc --destination-local-user cc "
-    #     f"{shlex.quote(src_cid)}:{shlex.quote(file)} "
-    #     f"{shlex.quote(dst_cid)}:{shlex.quote(file)} "
-    #     f"--label {shlex.quote(label)} {extra_arg} "
-    #     f"--no-verify-checksum --fail-on-quota-errors "
-    #     f"--format json --jmespath task_id "
-    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_log.log; "
-    #     f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
-    #     f"}} 2>&1 | tr '\\r' '\\n' "
-    #     f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
-    #     f"| tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
-    #     f"globus task wait \"$SUBMISSION_ID\" && globus task show \"$SUBMISSION_ID\" ",
-    #     localhost=cfg.localhost,
-    #     timeout=timeout,
-    # )
-    
-#task_id="$(globus transfer $source_ep $dest_ep     --jmespath 'task_id' --format=UNIX     --batch my_file_batch.txt)"
-# echo "Waiting on 'globus transfer' task '$task_id'"
-# globus task wait "$task_id" --timeout 30
-# if [ $? -eq 0 ]; then
-#     echo "$task_id completed successfully";
-# else
-#     echo "$task_id failed!";
-# fi
-
     cp = run_subprocess(
         cfg.localhost, None,
         f"set +x; mkdir -p {shlex.quote(out_dir)} && "
@@ -606,144 +610,6 @@ def start_globus_transfer(
         localhost=cfg.localhost,
         timeout=timeout,
     )
-
-    # cp = run_subprocess(
-    #     cfg.localhost, None,
-    #     f"set +x; mkdir -p {shlex.quote(out_dir)} && "
-    #     f"SUBMISSION_ID=$(globus task generate-submission-id) && "
-    #     f"echo \"$SUBMISSION_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}_submission_id.txt && "
-    #     f"echo \"SUBMISSION_ID=$SUBMISSION_ID\" && "
-    #     f"echo \"START $(date '+%Y-%m-%d %H:%M:%S')\" | tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
-
-    #     f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
-    #     f"globus transfer -v --submission-id \"$SUBMISSION_ID\" "
-    #     # f"--source-local-user cc --destination-local-user cc "
-    #     f"{shlex.quote(src_cid)}:{shlex.quote(file)} "
-    #     f"{shlex.quote(dst_cid)}:{shlex.quote(file)} "
-    #     f"--label {shlex.quote(label)} {extra_arg} "
-    #     f"--no-verify-checksum --fail-on-quota-errors "
-    #     f"--format unix --jmespath task_id --notify off "
-    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt "
-    #     f"2> {shlex.quote(out_dir)}/{shlex.quote(app)}_submit_stderr.log && "
-
-    #     f"TASK_ID=$(cat {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt | tr -d '\"[:space:]') && "
-    #     f"echo \"TASK_ID=$TASK_ID\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
-
-    #     # Log full task report every 1 second as JSON lines
-    #     f"TASK_REPORT_LOG={shlex.quote(out_dir)}/{shlex.quote(app)}_task_report.jsonl && "
-    #     f": > \"$TASK_REPORT_LOG\" && "
-    #     f"while true; do "
-    #     f"TS=$(date '+%Y-%m-%d %H:%M:%S'); "
-    #     f"REPORT=$(globus task show \"$TASK_ID\" -F json 2>> {shlex.quote(out_dir)}/{shlex.quote(app)}_poll_stderr.log) || true; "
-    #     f"STATUS=$(echo \"$REPORT\" | jq -r '.status // \"UNKNOWN\"'); "
-    #     f"echo \"$REPORT\" | jq -c --arg ts \"$TS\" '. + {{\"poll_timestamp\": $ts}}' >> \"$TASK_REPORT_LOG\"; "
-    #     f"echo \"$TS STATUS=$STATUS\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log; "
-    #     f"if [ \"$STATUS\" = \"SUCCEEDED\" ] || [ \"$STATUS\" = \"FAILED\" ] || [ \"$STATUS\" = \"INACTIVE\" ]; then "
-    #     f"break; "
-    #     f"fi; "
-    #     f"sleep 1; "
-    #     f"done && "
-
-    #     # Save final task report separately
-    #     f"globus task show \"$TASK_ID\" -F json "
-    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_show.json && "
-
-    #     # Optional: save task events/errors
-    #     f"globus task event-list \"$TASK_ID\" -F json "
-    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_events.json && "
-    #     f"globus task event-list \"$TASK_ID\" --filter-errors -F json "
-    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_errors.json && "
-
-    #     f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log",
-    #     localhost=cfg.localhost,
-    #     timeout=timeout,
-    # )
-
-    # cp = run_subprocess(
-    #     cfg.localhost, None,
-    #     f"set +x; mkdir -p {shlex.quote(out_dir)} && "
-    #     f"SUBMISSION_ID=$(globus task generate-submission-id) && "
-    #     f"echo \"$SUBMISSION_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}_submission_id.txt && "
-    #     f"echo \"SUBMISSION_ID=$SUBMISSION_ID\" && "
-    #     f"echo \"START $(date '+%Y-%m-%d %H:%M:%S')\" | tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
-
-    #     f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
-    #     f"globus transfer -v --submission-id \"$SUBMISSION_ID\" "
-    #     # f"--source-local-user cc --destination-local-user cc "
-    #     f"{shlex.quote(src_cid)}:{shlex.quote(file)} "
-    #     f"{shlex.quote(dst_cid)}:{shlex.quote(file)} "
-    #     f"--label {shlex.quote(label)} {extra_arg} "
-    #     f"--no-verify-checksum --fail-on-quota-errors "
-    #     f"--format unix --jmespath task_id --notify off "
-    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt "
-    #     f"2> {shlex.quote(out_dir)}/{shlex.quote(app)}_submit_stderr.log && "
-
-    #     f"TASK_ID=$(cat {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt | tr -d '\"[:space:]') && "
-    #     f"echo \"TASK_ID=$TASK_ID\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
-    
-    #     f"TASK_REPORT_LOG={shlex.quote(out_dir)}/{shlex.quote(app)}_task_report.jsonl && "
-    #     f"PROGRESS_LOG={shlex.quote(out_dir)}/{shlex.quote(app)}_progress.tsv && "
-    #     f": > \"$TASK_REPORT_LOG\" && "
-    #     f"echo -e \"timestamp\\telapsed_sec\\tstatus\\tbytes_transferred\\tpercent\\teffective_Bps\\teffective_Mbps\\tinstant_Bps\\tinstant_Mbps\\tfiles\\tfiles_transferred\\tsubtasks_pending\\tsubtasks_succeeded\\tsubtasks_failed\" > \"$PROGRESS_LOG\" && "
-    #     f"START_EPOCH=$(date +%s) && "
-    #     f"LAST_EPOCH=$START_EPOCH && "
-    #     f"LAST_BYTES=0 && "
-    #     f"SIZE_BYTES={int(size_bytes)} && "
-
-    #     f"while true; do "
-    #     f"NOW_EPOCH=$(date +%s); "
-    #     f"ELAPSED=$((NOW_EPOCH - START_EPOCH)); "
-    #     f"TS=$(date '+%Y-%m-%d %H:%M:%S'); "
-    #     f"REPORT=$(globus task show \"$TASK_ID\" -F json 2>> {shlex.quote(out_dir)}/{shlex.quote(app)}_poll_stderr.log) || true; "
-
-    #     f"STATUS=$(echo \"$REPORT\" | jq -r '.status // \"UNKNOWN\"'); "
-    #     f"BYTES=$(echo \"$REPORT\" | jq -r '.bytes_transferred // 0'); "
-    #     f"EFF_BPS=$(echo \"$REPORT\" | jq -r '.effective_bytes_per_second // 0'); "
-    #     f"FILES=$(echo \"$REPORT\" | jq -r '.files // 0'); "
-    #     f"FILES_XFER=$(echo \"$REPORT\" | jq -r '.files_transferred // 0'); "
-    #     f"PENDING=$(echo \"$REPORT\" | jq -r '.subtasks_pending // 0'); "
-    #     f"SUCCEEDED=$(echo \"$REPORT\" | jq -r '.subtasks_succeeded // 0'); "
-    #     f"FAILED=$(echo \"$REPORT\" | jq -r '.subtasks_failed // 0'); "
-
-    #     f"PERCENT=$(awk -v b=\"$BYTES\" -v s=\"$SIZE_BYTES\" 'BEGIN {{ if (s > 0) printf \"%.2f\", 100*b/s; else print \"0.00\" }}'); "
-    #     f"EFF_MBPS=$(awk -v r=\"$EFF_BPS\" 'BEGIN {{ printf \"%.3f\", r*8/1000000 }}'); "
-
-    #     f"DT=$((NOW_EPOCH - LAST_EPOCH)); "
-    #     f"DB=$((BYTES - LAST_BYTES)); "
-    #     f"if [ \"$DT\" -gt 0 ]; then "
-    #     f"INST_BPS=$(awk -v db=\"$DB\" -v dt=\"$DT\" 'BEGIN {{ printf \"%.3f\", db/dt }}'); "
-    #     f"else "
-    #     f"INST_BPS=0; "
-    #     f"fi; "
-    #     f"INST_MBPS=$(awk -v r=\"$INST_BPS\" 'BEGIN {{ printf \"%.3f\", r*8/1000000 }}'); "
-
-    #     f"echo \"$REPORT\" | jq -c --arg ts \"$TS\" '. + {{\"poll_timestamp\": $ts}}' >> \"$TASK_REPORT_LOG\"; "
-    #     f"echo -e \"$TS\\t$ELAPSED\\t$STATUS\\t$BYTES\\t$PERCENT\\t$EFF_BPS\\t$EFF_MBPS\\t$INST_BPS\\t$INST_MBPS\\t$FILES\\t$FILES_XFER\\t$PENDING\\t$SUCCEEDED\\t$FAILED\" >> \"$PROGRESS_LOG\"; "
-    #     f"echo \"$TS STATUS=$STATUS BYTES=$BYTES PERCENT=$PERCENT EFF_Mbps=$EFF_MBPS INST_Mbps=$INST_MBPS\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log; "
-
-    #     f"LAST_EPOCH=$NOW_EPOCH; "
-    #     f"LAST_BYTES=$BYTES; "
-
-    #     f"if [ \"$STATUS\" = \"SUCCEEDED\" ] || [ \"$STATUS\" = \"FAILED\" ] || [ \"$STATUS\" = \"INACTIVE\" ]; then "
-    #     f"break; "
-    #     f"fi; "
-    #     f"sleep 1; "
-    #     f"done && "
-
-    #     # Save final task report separately
-    #     f"globus task show \"$TASK_ID\" -F json "
-    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_show.json && "
-
-    #     # Optional: save task events/errors
-    #     f"globus task event-list \"$TASK_ID\" -F json "
-    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_events.json && "
-    #     f"globus task event-list \"$TASK_ID\" --filter-errors -F json "
-    #     f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_errors.json && "
-
-    #     f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log",
-    #     localhost=cfg.localhost,
-    #     timeout=timeout,
-    # )
     logging.info(
         "GTR: Completed globus transfer of %s from %s to rsync://%s:%s/%s/%s",
         file, src_cid, dst_cid, file, app, file
@@ -1018,7 +884,7 @@ def start_rsync_transfer(
         f"rsync -avvv --info=progress2,stats2 --no-compress --no-checksum "
         f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
         f"{shlex.quote(module_path)}/{shlex.quote(file)} {shlex.quote(rsync_url)} "
-        f"--log-file={shlex.quote(out_dir)}/rsync_log.log; "
+        f"--log-file={shlex.quote(out_dir)}/rsync-log.log; "
         f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
         f"}} 2>&1 | tr '\\r' '\\n' "
         f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "

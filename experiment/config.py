@@ -87,7 +87,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lease", required=True, help="Lease name on the testbed")
     parser.add_argument("--test", required=True, choices=["stream", "transfer"], help="Experiment/test to perform")
     parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
-    parser.add_argument("--remote-user", default="ubuntu", help="Remote username on the nodes")
 
     parser.add_argument("--initiator-ap", default="chi-trans-consap")
     parser.add_argument("--listener-ap", default="chi-trans-prodap")
@@ -158,10 +157,8 @@ def build_config(args: argparse.Namespace) -> Config:
         blocks=args.blocks,
         run_num=args.run,
 
-        local_env=str(
-            Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()
-        ),
-        remote_env=f"/home/{args.remote_user}/streams-cli/bin/activate",
+        local_env="$HOME/Projects/globus_stream/streams-cli/bin/activate",
+        remote_env="$HOME/streams-cli/bin/activate",
         report_dir=args.output,
     )
 

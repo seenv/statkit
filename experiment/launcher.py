@@ -8,7 +8,7 @@ from config import Config
 
 from utils import restart_gridftp, get_stream_id, start_tunnel, status_tunnel
 from utils import stop_tunnel, delete_tunnel, record_ping, gridftp_config
-from utils import init_listener_env, init_initiator_env, gridftp_report
+from utils import init_listener_env, init_initiator_env, gridftp_report, logging_gridftp
 from utils import make_file, start_statkit, stop_statkit, cleanup_iperf
 from utils import start_iperf_server, start_iperf_client, system_state_report
 from utils import base_start_iperf_server, base_start_iperf_client
@@ -161,11 +161,6 @@ def run_globus_transfer(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         logging.info("GTR: Stopping the statkit monitoring on the hosts")
         # cleanup_iperf(cfg)
         stop_statkit(cfg)
-        # stop_tunnel(cfg, tunnel_id)
-        # status_tunnel(cfg, tunnel_id, "STOPPED")
-        # delete_tunnel(cfg, tunnel_id)
-        #restart_gridftp(cfg)
-
 
 
 def experiment_main(cfg: Config) -> None:
@@ -201,30 +196,24 @@ def experiment_main(cfg: Config) -> None:
 
         temp_file = f"{arg}G.bin"
         if cfg.test == "transfer":
-            #output_dir = f"{cfg.report_dir}/B{block}/P{parallel}/S{arg}/A{splice}/E{encrypt}/R{run}"
             output_path = Path(cfg.report_dir) / f"B{block}" / f"P{parallel}" / f"S{arg}" / f"A{splice}" / f"E{encrypt}" / f"R{run}"
             output_dir = str(output_path)
             make_file(cfg, arg, temp_file)
         elif cfg.test == "stream":
-            #output_dir = f"{cfg.report_dir}/B{block}/P{parallel}/T{arg}/A{splice}/E{encrypt}/R{run}"
             output_path = Path(cfg.report_dir) / f"B{block}" / f"P{parallel}" / f"T{arg}" / f"A{splice}" / f"E{encrypt}" / f"R{run}"
             output_dir = str(output_path)
         timeout = (arg * 120)
 
-        if block != last_block or splice != last_splice or encrypt != last_encrypt:
-            logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
-            gridftp_config(cfg, block, splice, encrypt)
-            last_block, last_splice, last_encrypt= block, splice, encrypt
-
-        # temp_file = f"{arg}G.bin"
-        # if cfg.test == "transfer":
-        #     make_file(cfg, arg, temp_file)
-
-        logging.info("GTR: Recording the Gridftp configuration")
-        gridftp_report(cfg, output_dir)
-        time.sleep(cfg.sleep)
-
         if "iperf" in cfg.app:
+            if block != last_block or splice != last_splice or encrypt != last_encrypt:
+                logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
+                gridftp_config(cfg, block, splice, encrypt)
+                last_block, last_splice, last_encrypt= block, splice, encrypt
+                restart_gridftp(cfg)
+            logging.info("GTR: Recording the Gridftp configuration")
+            gridftp_report(cfg, output_dir)
+            time.sleep(cfg.sleep)
+            
             run_iperf_gst(
                 cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
                 parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.tunnel_port,
@@ -252,6 +241,11 @@ def experiment_main(cfg: Config) -> None:
             time.sleep(cfg.sleep)
 
         if "gtr" in cfg.app:
+            logging_gridftp(cfg, output_dir)
+            logging.info("GTR: Changing the Gridftp log path")
+            restart_gridftp(cfg)
+            time.sleep(cfg.sleep)
+            
             run_globus_transfer(
                 cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
