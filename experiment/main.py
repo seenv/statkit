@@ -16,7 +16,7 @@ def main() -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{cfg.test.replace(' ', '_')}-{datetime.now().strftime('%m-%d-%H-%M')}.log"
     setup_logging(cfg.verbose, str(log_path))
-    logging.info("MAIN: Starting the experiment: %s \n %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), log_path)
+    logging.info("MAIN: Starting the experiment: %s Log file: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), log_path)
     try:
         if cfg.test in {"stream", "transfer"}:
             experiment_main(cfg)
@@ -29,6 +29,7 @@ def main() -> None:
             f"logfile: {log_path} \n"
             )
         send_ntfy(success=False, cfg=cfg, error=e)
+        logging.info("MAIN: Log file: %s", log_path)
         raise
 
     send_ntfy(success=True, cfg=cfg)     

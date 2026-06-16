@@ -25,6 +25,7 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
     ids = get_stream_id(cfg)
     initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
     tunnel_label = f"{cfg.lease.replace(' ', '_')}-{cfg.test.replace(' ', '_')}-idx{idx}-tot{total_runs}"
+    logging.info("GST: Creating the tunnel on Localhost")
     tunnel_id = start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label)
     time.sleep(cfg.sleep)
 
@@ -67,7 +68,8 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         stop_tunnel(cfg, tunnel_id)
         status_tunnel(cfg, tunnel_id, "STOPPED")
         delete_tunnel(cfg, tunnel_id)
-        restart_gridftp(cfg)
+        hosts = list(cfg.hosts.ap.values())
+        restart_gridftp(cfg, hosts)
 
 
 def run_iperf_baseline(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
@@ -120,7 +122,7 @@ def run_rsync(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file
             cfg.test, "/tmp/temp_files")
         logging.info("RSYNC: Recording RTT")        # it will run on the client
         #record_ping(cfg, initiator_host, cfg.listener_ip, "iperf_gst", output_dir)
-        record_ping(cfg, initiator_host, cfg.listener_pub, "iperf_gst", output_dir)
+        record_ping(cfg, initiator_host, cfg.listener_pub, "rsync", output_dir)
 
     except Exception as e:
         raise RuntimeError(f"RSYNC: Runtime Error: {e}") from e
@@ -151,7 +153,7 @@ def run_globus_transfer(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         arg, encrypt, temp_file, "globus_gtr", output_dir, timeout)
         # recording rtt
         logging.info("GTR: Recording the RTT")
-        record_ping(cfg, initiator_host, cfg.listener_pub, "iperf_gst", output_dir)
+        record_ping(cfg, initiator_host, cfg.listener_pub, "globus_gtr", output_dir)
         
     except Exception as e:
         raise RuntimeError(f"GTR: Runtime Error: {e}") from e
@@ -161,6 +163,8 @@ def run_globus_transfer(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         logging.info("GTR: Stopping the statkit monitoring on the hosts")
         # cleanup_iperf(cfg)
         stop_statkit(cfg)
+        hosts = list(cfg.hosts.ep.values())
+        restart_gridftp(cfg, hosts)
 
 
 def experiment_main(cfg: Config) -> None:
@@ -182,7 +186,7 @@ def experiment_main(cfg: Config) -> None:
     )
 
     last_block, last_splice, last_encrypt= None, None, None
-    total_runs =  len(blocks) * len(parallels) * len(args) * len(splices) * len(encrypts) * runs
+    total_runs =  len(blocks) * len(parallels) * len(args) * len(splices) * len(encrypts) * len(cfg.app) * runs
     
     logging.info("SYS: Recording the system reports")
     sys_report_dir = str(Path(cfg.report_dir) / "sys-info")
@@ -207,9 +211,11 @@ def experiment_main(cfg: Config) -> None:
         if "iperf" in cfg.app:
             if block != last_block or splice != last_splice or encrypt != last_encrypt:
                 logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
-                gridftp_config(cfg, block, splice, encrypt)
+                gridftp_config(cfg, block, splice, encrypt, output_dir)
                 last_block, last_splice, last_encrypt= block, splice, encrypt
-                restart_gridftp(cfg)
+                hosts = list(cfg.hosts.ap.values())
+                restart_gridftp(cfg, hosts)
+                #time.sleep(cfg.sleep)
             logging.info("GTR: Recording the Gridftp configuration")
             gridftp_report(cfg, output_dir)
             time.sleep(cfg.sleep)
@@ -243,8 +249,8 @@ def experiment_main(cfg: Config) -> None:
         if "gtr" in cfg.app:
             logging_gridftp(cfg, output_dir)
             logging.info("GTR: Changing the Gridftp log path")
-            restart_gridftp(cfg)
-            time.sleep(cfg.sleep)
+            #restart_gridftp(cfg)
+            #time.sleep(cfg.sleep)
             
             run_globus_transfer(
                 cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,

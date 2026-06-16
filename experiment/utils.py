@@ -71,6 +71,19 @@ def is_ssh_failure(cp: subprocess.CompletedProcess[str]) -> bool:
 #     else:
 #         cmd = (f"{prefix} {cmd}")
 #     return cmd
+
+# def _env_wrap(cmd: str, env: Optional[str], discard: bool = False) -> str:
+#     prefix = (
+#         "set -euo pipefail >/dev/null 2>&1; set -x; "
+#         if not discard
+#         else "set -euo pipefail; set -x; "
+#     )
+#     if env:
+#         cmd = f"{prefix} . {env} > /dev/null 2>&1; {cmd}"
+#     else:
+#         cmd = f"{prefix} {cmd}"
+#     return cmd
+
 def _env_wrap(cmd: str, env: Optional[str], discard: bool = False) -> str:
     prefix = (
         "set -euo pipefail >/dev/null 2>&1; set -x; "
@@ -78,10 +91,9 @@ def _env_wrap(cmd: str, env: Optional[str], discard: bool = False) -> str:
         else "set -euo pipefail; set -x; "
     )
     if env:
-        cmd = f"{prefix} . {env} > /dev/null 2>&1; {cmd}"
-    else:
-        cmd = f"{prefix} {cmd}"
-    return cmd
+        return f"{prefix} . {env} > /dev/null 2>&1 && {cmd}"
+    return f"{prefix} {cmd}"
+
 
 def _build_argv(host: str, env: Optional[str], cmd: str, localhost: str) -> list[str]:
     wrapped = _env_wrap(cmd, env)
@@ -200,6 +212,7 @@ def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
     )
     logging.info("RSYNC: Prepared destination on %s: file=%s", host.upper(), dest_path)
 
+
 _UUID_CANDIDATE = re.compile(r"[0-9a-fA-F-]{32,36}")
 def _parse_uid(output: str) -> str:
     for m in _UUID_CANDIDATE.finditer(output):
@@ -236,17 +249,59 @@ def _parse_contact_port(output: str) -> int:
     return int(m.group("port"))
 
 
-def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, check: bool = True) -> None:
+def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, check: bool = True) -> None:
+    awai_debug_log = shlex.quote(f'{out_dir}/awai-debug.log')
+    gridftp_sever_log = shlex.quote(f'{out_dir}/gridftp-server.log')
     for host in cfg.hosts.ap.values():
+        if encr == 1:
+            extra = (
+                f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|#$AWAI_SPLICE_ROUTING {awai}|' "
+                f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|$AWAI_WAN_ENCRYPTION {encr}|' "
+            )
+        else:
+            extra = (
+                f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|$AWAI_SPLICE_ROUTING {awai}|' "
+                f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|#$AWAI_WAN_ENCRYPTION {encr}|' "
+            )
         cp = run_subprocess(
             host, None,
             f"sudo sed -i -E "
             f"-e 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' "
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|$AWAI_SPLICE_ROUTING {awai}|' "
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|$AWAI_WAN_ENCRYPTION {encr}|' "
+            f"{extra} "
             #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}|' "
-            f"/etc/gridftp.d/zdebug; "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_AWAI_DEBUG[[:space:]]+.*$|$GLOBUS_AWAI_DEBUG {awai_debug_log}|' "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_GRIDFTP_SERVER_DEBUG[[:space:]]+.*$|$GLOBUS_GRIDFTP_SERVER_DEBUG {gridftp_sever_log}|' "
+            f"/etc/gridftp.d/zdebug && "
             f"sudo cat /etc/gridftp.d/zdebug ",
+            # "sudo touch /etc/gridftp.d/zdebug && "
+            # # Replace existing lines if present
+            # f"sudo sed -i -E "
+            # f"-e 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' "
+            # f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|$AWAI_SPLICE_ROUTING {awai}|' "
+            # f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|$AWAI_WAN_ENCRYPTION {encr}|' "
+            # f"/etc/gridftp.d/zdebug && "
+            # # Add missing lines
+            # f"grep -Eq '^[[:space:]]*blocksize[[:space:]]+' /etc/gridftp.d/zdebug "
+            # f"|| echo 'blocksize {blk}M' | sudo tee -a /etc/gridftp.d/zdebug >/dev/null; "
+            # f"grep -Eq '^[[:space:]]*threads[[:space:]]+' /etc/gridftp.d/zdebug "
+            # f"|| echo 'threads 16' | sudo tee -a /etc/gridftp.d/zdebug >/dev/null; "
+            # f"grep -Eq '^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+' /etc/gridftp.d/zdebug "
+            # f"|| echo '$AWAI_SPLICE_ROUTING {awai}' | sudo tee -a /etc/gridftp.d/zdebug >/dev/null; "
+            # f"grep -Eq '^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+' /etc/gridftp.d/zdebug "
+            # f"|| echo '$AWAI_WAN_ENCRYPTION {encr}' | sudo tee -a /etc/gridftp.d/zdebug >/dev/null; "
+            
+            # f"grep -Eq '^[[:space:]]*#$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+' /etc/gridftp.d/zdebug "
+            # f"|| echo '#$AWAI_SPLICE_ROUTING_BUFFER_SIZE 1048576' | sudo tee -a /etc/gridftp.d/zdebug >/dev/null; "
+            # f"grep -Eq '^[[:space:]]*#$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+' /etc/gridftp.d/zdebug "
+            # f"|| echo '#$AWAI_SPLICE_ROUTING_BUFFER_SIZE 33554432' | sudo tee -a /etc/gridftp.d/zdebug >/dev/null; "
+            # f"grep -Eq '^[[:space:]]*#$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+' /etc/gridftp.d/zdebug "
+            # f"|| echo '#$AWAI_SPLICE_ROUTING_BUFFER_SIZE 67108864' | sudo tee -a /etc/gridftp.d/zdebug >/dev/null; "
+            
+            # f"grep -Eq '^[[:space:]]*$GLOBUS_AWAI_DEBUG[[:space:]]+' /etc/gridftp.d/zdebug "
+            # f"|| echo '$GLOBUS_AWAI_DEBUG ALL,{out_dir}' | sudo tee -a /etc/gridftp.d/zdebug >/dev/null; "
+            # f"grep -Eq '^[[:space:]]*$GLOBUS_GRIDFTP_SERVER_DEBUG[[:space:]]+' /etc/gridftp.d/zdebug "
+            # f"|| echo '$GLOBUS_GRIDFTP_SERVER_DEBUG ALL,{out_dir},1,ALL' | sudo tee -a /etc/gridftp.d/zdebug >/dev/null; "
+            # f"sudo cat /etc/gridftp.d/zdebug",
             localhost=cfg.localhost
         )
         if check and cp.returncode != 0:
@@ -256,6 +311,31 @@ def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, check: bool = Tru
             )
         head = "\n".join(cp.stdout.splitlines()[:5])
         logging.debug("GTR: Gridftp splice and blocksize config on %s:\n%s", host.upper(), head)
+
+
+def logging_gridftp(cfg: Config, out_dir: str, check: bool = True) -> None:
+    audit_log = shlex.quote(f'{out_dir}/gridftp-audit.log')
+    single_log = shlex.quote(f'{out_dir}/gridftp-single.log')
+
+    for host in cfg.hosts.ep.values():
+    #hosts = list(cfg.hosts.ep.values())
+    #hosts.append(cfg.localhost)
+    #for host in hosts:
+        cp = run_subprocess(
+            host, None,
+            f"sudo sed -i -E "
+            f"-e 's|^[[:space:]]*log_audit[[:space:]]+.*$|log_audit {audit_log}|' "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_single[[:space:]]+.*$|log_single {single_log}|' "
+            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_transfer[[:space:]]+.*$|log_transfer {transfer_log}|' "
+            f"/etc/gridftp.d/z_logging && "
+            f"sudo cat /etc/gridftp.d/z_logging ",
+            localhost=cfg.localhost,
+        )
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"GTR: Failed changing GridFTP logging paths on {host.upper()}\n"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
 
 
 def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
@@ -272,33 +352,6 @@ def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         logging.debug("GTR: Recorded the Gridftp configuration on %s", host.upper())
-
-
-def logging_gridftp(cfg: Config, out_dir: str, check: bool = True) -> None:
-    audit_log = shlex.quote(f'{out_dir}/gridftp-audit.log')
-    single_log = shlex.quote(f'{out_dir}/gridftp-single.log')
-    transfer_log = shlex.quote(f'{out_dir}/gridftp-transfer.log')
-
-    #for host in cfg.hosts.ep.values():
-    hosts = list(cfg.hosts.ep.values())
-    #hosts.append(cfg.localhost)
-    for host in hosts:
-        cp = run_subprocess(
-            host,
-            None,
-            f"sudo sed -i -E "
-            f"-e \"s|^[[:space:]]*log_audit[[:space:]]+.*$|log_audit {audit_log}|\" "
-            f"-e \"s|^[[:space:]]*log_single[[:space:]]+.*$|log_single {single_log}|\" "
-            f"-e \"s|^[[:space:]]*log_transfer[[:space:]]+.*$|log_transfer {transfer_log}|\" "
-            f"/etc/gridftp.d/z_logging ; "
-            f"sudo cat /etc/gridftp.d/z_logging",
-            localhost=cfg.localhost,
-        )
-        if check and cp.returncode != 0:
-            raise RuntimeError(
-                f"GTR: Failed changing GridFTP logging paths on {host.upper()}\n"
-                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-            )
 
 
 def _sysctl_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
@@ -476,10 +529,10 @@ def system_state_report(cfg: Config, out_dir: str, check: bool = True) -> None:
     _storage_report(cfg, hosts, out_dir, path=out_dir, check=check)
 
 
-def restart_gridftp(cfg: Config, check: bool = True) -> None:
-    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+def restart_gridftp(cfg: Config, hosts: list[str], check: bool = True) -> None:
+    # hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
-    #for host in cfg.hosts.ap.values():
+    # for host in cfg.hosts.ap.values():
         cp = run_subprocess(
             host, None,
             "sudo systemctl restart apache2.service && "
@@ -766,12 +819,18 @@ def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: 
     extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} " if cfg.test == "transfer" else ""
     cp = popen_subprocess(
         host, cfg.remote_env,
+        # f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+        # f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
+        # f"globus-streams-launch -p {port} {shlex.quote(tunnel_id)} "
+        # f"iperf3 -s -p {port} -1 --timestamps --forceflush "
+        # f"{extra_arg} "
+        # f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json  & "
+        # "echo $! " ,
         f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
         "globus-streams-launch "
         f"-p {port} {shlex.quote(tunnel_id)} "
-        f"iperf3 -s -p {port} -1 "
-        f"--timestamps  --forceflush "
+        f"iperf3 -s -p {port} -1  --timestamps  --forceflush "
         f"{extra_arg} "
         f"-J --logfile {out_dir}/{shlex.quote(app)}.json & "
         "echo $! " ,
@@ -783,15 +842,18 @@ def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: 
 def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, 
     parallel: int, arg: int, file: str, app: str, out_dir: str, timeout: int, 
     temp_dir: str = "/tmp/temp_files", check: bool = True) -> subprocess.CompletedProcess[str]:
-    size = parse_size_to_bytes(arg)
-    extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+    size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
+    #extra_arg = f"-Z -R -n {arg}G -F {shlex.quote(temp_dir)}/{shlex.quote(file)} " if cfg.test == "transfer" else f"-P {parallel} -i 10 -O 10 -Z -R -t {arg} "    
+    # extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+    extra_arg = f"-n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
     cp = run_subprocess(
         host, cfg.remote_env,
         f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}_time.log "
         "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "
-        f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
+        f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} --timestamps  --forceflush "
+        #f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
         f"-Z -R -P {parallel} --timestamps  --forceflush "
         f"{extra_arg} "
         f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
@@ -823,7 +885,9 @@ def base_start_iperf_client(
     cfg: Config, host: str, listener_pub: str, port: int, parallel: int, arg: int, 
     file: str, app: str, out_dir: str, timeout: int, temp_dir: str = "/tmp/temp_files", check: bool = True
     ) -> subprocess.CompletedProcess[str]:  
-    extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {arg}G " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+    size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
+    #extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+    extra_arg = f"-n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
     cp = run_subprocess(
         host, cfg.remote_env,
         f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "

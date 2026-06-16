@@ -87,6 +87,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lease", required=True, help="Lease name on the testbed")
     parser.add_argument("--test", required=True, choices=["stream", "transfer"], help="Experiment/test to perform")
     parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
+    #parser.add_argument("--remote-user", default="cc", help="Remote username on the nodes")
 
     parser.add_argument("--initiator-ap", default="chi-trans-consap")
     parser.add_argument("--listener-ap", default="chi-trans-prodap")
@@ -98,7 +99,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initiator-ip", default="192.168.120.10")
     parser.add_argument("--initiator-pub", default="10.191.129.103")
 
-    parser.add_argument("--tunnel-port", type=int, default=50000)
+    parser.add_argument("--tunnel-port", type=int, default=49997)
     parser.add_argument("--direct-port", type=int, default=49999)
     parser.add_argument("--rsync-port", type=int, default=49998)
 
@@ -112,8 +113,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--size", "-n", type=_parse_int_list, default=[1])
     parser.add_argument("--blocks", "-b", type=_parse_int_list, default=[32])
     parser.add_argument("--run", "-r", type=int, default=1)
-
-    parser.add_argument("--output", "-o", default="/tmp")
+        
+    parser.add_argument("--output", "-o", default="/tmp/")
 
     return parser.parse_args()
 
@@ -158,7 +159,9 @@ def build_config(args: argparse.Namespace) -> Config:
         run_num=args.run,
 
         local_env="$HOME/Projects/globus_stream/streams-cli/bin/activate",
+        #local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()),
         remote_env="$HOME/streams-cli/bin/activate",
+        #remote_env=f"/home/{args.remote_user}/streams-cli/bin/activate",
         report_dir=args.output,
     )
 
