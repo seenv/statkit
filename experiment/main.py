@@ -12,9 +12,9 @@ def main() -> None:
     
     cfg = get_config()
     #print(cfg)
-    log_dir = Path("/tmp/statkit")
+    log_dir = Path(f"/tmp/{cfg.lease}/{cfg.test}/statkit")
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{cfg.test.replace(' ', '_')}-{datetime.now().strftime('%m-%d-%H-%M')}.log"
+    log_path = log_dir / f"{datetime.now().strftime('%m-%d-%H-%M')}.log"
     setup_logging(cfg.verbose, str(log_path))
     logging.info("MAIN: Starting the experiment: %s Log file: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), log_path)
     try:
@@ -29,8 +29,9 @@ def main() -> None:
             f"logfile: {log_path} \n"
             )
         send_ntfy(success=False, cfg=cfg, error=e)
-        logging.info("MAIN: Log file: %s", log_path)
         raise
+    finally:
+        logging.info("MAIN: Log file: %s", log_path)
 
     send_ntfy(success=True, cfg=cfg)     
     print(

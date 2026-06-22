@@ -51,6 +51,7 @@ class Hosts:
 @dataclass(frozen=True)
 class Config:
     verbose: bool
+    is_test: bool
     lease: str
     test: TestMode
 
@@ -62,13 +63,15 @@ class Config:
     initiator_pub: str
 
     tunnel_port: int
+    encrypt_port: int
     direct_port: int
     rsync_port: int
 
     sleep: int
 
     app: Sequence[str]
-    encrypt: Sequence[int]
+    # encrypt: Sequence[int]
+    encrypt: bool
     splice: Sequence[int]
     parallels: Sequence[int]
     time_frames: Sequence[int]
@@ -84,30 +87,31 @@ class Config:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run stream or transfer experiments.")
     parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--is-test", action="store_true")
     parser.add_argument("--lease", required=True, help="Lease name on the testbed")
     parser.add_argument("--test", required=True, choices=["stream", "transfer"], help="Experiment/test to perform")
     parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
-    #parser.add_argument("--remote-user", default="cc", help="Remote username on the nodes")
 
-    parser.add_argument("--initiator-ap", default="chi-trans-consap")
+    parser.add_argument("--initiator-ap", type=str, default="chi-trans-consap")
     parser.add_argument("--listener-ap", default="chi-trans-prodap")
     parser.add_argument("--initiator-ep", default="chi-trans-consep")
     parser.add_argument("--listener-ep", default="chi-trans-prodep")
 
     parser.add_argument("--listener-ip", default="192.168.110.10")
-    parser.add_argument("--listener-pub", default="10.191.131.177")
+    parser.add_argument("--listener-pub", default="10.191.130.100")
     parser.add_argument("--initiator-ip", default="192.168.120.10")
-    parser.add_argument("--initiator-pub", default="10.191.129.103")
+    parser.add_argument("--initiator-pub", default="10.191.129.43")
 
-    parser.add_argument("--tunnel-port", type=int, default=49997)
+    parser.add_argument("--tunnel-port", type=int, default=49996)
+    parser.add_argument("--encrypt-port", type=int, default=49995)
     parser.add_argument("--direct-port", type=int, default=49999)
     parser.add_argument("--rsync-port", type=int, default=49998)
 
     parser.add_argument("--sleep", type=int, default=15)
 
     parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,base,rsync,gtr")
-    parser.add_argument("--encrypt", type=_parse_int_list, default=[0])
-    parser.add_argument("--splice", type=_parse_int_list, default=[1])
+    parser.add_argument("--encrypt", action="store_true", help="Encryption is tested with splice disabled")
+    parser.add_argument("--splice", type=_parse_int_list, default=[0, 1])
     parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])
     parser.add_argument("--time", "-t", type=_parse_int_list, default=[10])
     parser.add_argument("--size", "-n", type=_parse_int_list, default=[1])
@@ -124,6 +128,7 @@ def build_config(args: argparse.Namespace) -> Config:
 
     return Config(
         verbose=args.verbose,
+        is_test=args.is_test,
         lease=args.lease,
         test=cast(TestMode, args.test),
 
@@ -144,14 +149,16 @@ def build_config(args: argparse.Namespace) -> Config:
         initiator_pub=args.initiator_pub,
 
         tunnel_port=args.tunnel_port,
+        encrypt_port=args.encrypt_port,
         direct_port=args.direct_port,
         rsync_port=args.rsync_port,
 
         sleep=args.sleep,
 
         app=args.app,
-        encrypt=args.encrypt,
+        encrypt=bool(args.encrypt),
         splice=args.splice,
+        #splice=bool(args.splice),
         parallels=args.parallel,
         time_frames=args.time if is_stream else [],
         file_sizes=args.size if not is_stream else [],
