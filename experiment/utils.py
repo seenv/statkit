@@ -417,13 +417,17 @@ def _nic_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = T
         f"mkdir -p {shlex.quote(out_dir)} && "
         f"for dev in $(ls /sys/class/net | grep -v '^lo$'); do "
         f"( "
-        f"echo '### ip link show dev' $dev; ip link show dev $dev; "
+        f"echo '### ip -d link show dev' $dev; ip -d link show dev $dev; "
         f"echo; echo '### ethtool' $dev; sudo ethtool $dev; "
         f"echo; echo '### ethtool -i' $dev; sudo ethtool -i $dev; "
+        f"echo; echo '### ethtool -a' $dev; sudo ethtool -a $dev; "
         f"echo; echo '### ethtool -g' $dev; sudo ethtool -g $dev; "
         f"echo; echo '### ethtool -k' $dev; sudo ethtool -k $dev; "
         f"echo; echo '### ethtool -c' $dev; sudo ethtool -c $dev; "
         f"echo; echo '### ethtool -S' $dev; sudo ethtool -S $dev; "
+        f"echo; echo '### ethtool --show-fec' $dev; sudo ethtool --show-fec $dev; "
+        f"echo; echo '### ethtool --show-priv-flags' $dev; sudo ethtool --show-priv-flags $dev; "
+        f"echo; echo '### tx_queue_len' $dev; cat /sys/class/net/$dev/tx_queue_len; "
         f"echo; echo '### tc -s qdisc show dev' $dev; sudo tc -s qdisc show dev $dev; "
         f") > {shlex.quote(out_dir)}/nic_${{dev}}.log 2>&1; "
         f"done"
@@ -442,6 +446,8 @@ def _cpu_irq_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool
     cmd = (
         f"mkdir -p {shlex.quote(out_dir)} && "
         f"( "
+        f"echo '### irqbalance service status'; "
+        f"echo; echo '### irqbalance status'; systemctl status irqbalance --no-pager || true; "
         f"echo '### CPU governor'; "
         f"for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo \"$f: $(cat $f 2>/dev/null)\"; done; "
         f"echo; echo '### CPU frequencies'; "
@@ -680,7 +686,7 @@ def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, lbl: str, tim
         f"--label {shlex.quote(lbl)} "
         f"{shlex.quote(initiator_id)} {shlex.quote(listener_id)} ",
         localhost=cfg.localhost,
-        timeout=timeout,
+        #timeout=timeout,
     )
     if check and cp.returncode != 0:
         raise RuntimeError(
