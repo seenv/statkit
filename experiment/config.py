@@ -43,6 +43,17 @@ def _parse_app_list(s: str) -> list[str]:
     return apps
 
 
+def _parse_numa_list(s: str) -> list[str]:
+    valid_numas = {"numa", "no-numa"}
+    numas = _parse_str_list(s)
+    invalid = sorted(set(numas) - valid_numas)
+    if invalid:
+        raise argparse.ArgumentTypeError(
+            f"Invalid app(s): {', '.join(invalid)}. "
+            f"Valid choices: {', '.join(sorted(valid_numas))}"
+        )
+    return numas
+
 @dataclass(frozen=True)
 class Hosts:
     ap: Mapping[Role, str]
@@ -54,6 +65,8 @@ class Config:
     is_test: bool
     lease: str
     test: TestMode
+    
+    numactl: Sequence[str]
 
     localhost: str
     hosts: Hosts
@@ -92,6 +105,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test", required=True, choices=["stream", "transfer"], help="Experiment/test to perform")
     parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
 
+    parser.add_argument("--numactl", type=_parse_numa_list, required=True, help="Experimetns with numa tunning enabled")
+
     parser.add_argument("--initiator-ap", type=str, default="chi-trans-consap")
     parser.add_argument("--listener-ap", default="chi-trans-prodap")
     parser.add_argument("--initiator-ep", default="chi-trans-consep")
@@ -107,11 +122,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--direct-port", type=int, default=49999)
     parser.add_argument("--rsync-port", type=int, default=49998)
 
-    parser.add_argument("--sleep", type=int, default=15)
+    parser.add_argument("--sleep", type=int, default=5)
 
     parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,base,rsync,gtr")
     parser.add_argument("--encrypt", action="store_true", help="Encryption is tested with splice disabled")
-    parser.add_argument("--splice", type=_parse_int_list, default=[0, 1])
+    parser.add_argument("--splice", type=_parse_int_list, default=[0])
     parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])
     parser.add_argument("--time", "-t", type=_parse_int_list, default=[10])
     parser.add_argument("--size", "-n", type=_parse_int_list, default=[1])
@@ -131,6 +146,8 @@ def build_config(args: argparse.Namespace) -> Config:
         is_test=args.is_test,
         lease=args.lease,
         test=cast(TestMode, args.test),
+        
+        numactl=args.numactl,
 
         localhost=args.userhost,
         hosts=Hosts(

@@ -188,163 +188,8 @@ def send_ntfy(success: bool, cfg: Config, error: Exception | None = None) -> Non
 
 
 # Helpers:
-def make_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/temp_files") -> None:
-    host = cfg.hosts.ep.get("listener")
-    #if ("iperf" in cfg.app or "rsync" in cfg.app) and "gtr" in cfg.app:
-    cp = run_subprocess(
-        host, None,
-        f"mkdir -p {shlex.quote(file_path)} && "
-        f"fallocate -l {size}G {shlex.quote(file_path)}/{shlex.quote(temp_file)} && "
-        f"test -f {shlex.quote(file_path)}/{shlex.quote(temp_file)} && "
-        f"du -h {shlex.quote(file_path)}/{shlex.quote(temp_file)}",
-        localhost=cfg.localhost,
-    )
-    logging.info("FILE: Source file on %s: %s", host.upper(), cp.stdout.strip())
-
-
-def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
-    dest_dir = str(PurePosixPath(dest_path).parent)
-
-    run_subprocess(
-        host, None,
-        f"mkdir -p {shlex.quote(dest_dir)} ", #&& ",
-        localhost=cfg.localhost,
-    )
-    logging.info("RSYNC: Prepared destination on %s: file=%s", host.upper(), dest_path)
-
-
-_UUID_CANDIDATE = re.compile(r"[0-9a-fA-F-]{32,36}")
-def _parse_uid(output: str) -> str:
-    for m in _UUID_CANDIDATE.finditer(output):
-        try:
-            return str(uuid.UUID(m.group(0)))
-        except ValueError:
-            pass
-    raise RuntimeError(f"Could not find UUID in output:\n{output}")
-
-def _parse_gateway_id(output: str,  parts: list[str], *, exact: bool = False) -> str:
-    for line in output.splitlines():
-        if "|" not in line:
-            continue
-        if line.strip().startswith("---"):
-            continue
-        # first column is Display Name
-        display = line.split("|", 1)[0].strip()
-        if not all(part in display for part in parts):
-            continue
-        m = _UUID_CANDIDATE.search(line)
-        if not m:
-            raise RuntimeError(f"Matched name but no ID found on line:\n{line}")
-        return str(uuid.UUID(m.group(0)))
-    raise RuntimeError(f"No gateway row matched name={parts!r}.\nOutput:\n{output}")
-
-
-def _parse_contact_port(output: str) -> int:
-    m = re.search(
-        r"Your contact string is:\s*(?P<host>[^:\s]+)\s*:\s*(?P<port>\d+)",
-        output, flags=re.IGNORECASE
-    )
-    if not m:
-        raise RuntimeError(f"Could not find contact string / port in output:\n{output}")
-    return int(m.group("port"))
-
-
-def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, check: bool = True) -> None:
-    if awai not in (0, 1):
-        raise ValueError(f"Invalid splice value: {awai}. Expected 0 or 1.")
-    if encr not in (0, 1):
-        raise ValueError(f"Invalid encrypt value: {encr}. Expected 0 or 1.")
-    if awai == 1 and encr == 1:
-        raise ValueError("Invalid GridFTP mode: splice=1 and encrypt=1 cannot both be enabled.")
-    
-    # awai_debug_log = shlex.quote(f'{out_dir}/awai-debug.log')
-    # gridftp_server_log = shlex.quote(f'{out_dir}/gridftp-server.log')
-    awai_debug_log = f'"{out_dir}/gridftp-audit.log"'
-    gridftp_server_log = f'"{out_dir}/gridftp-server.log"'
-    splice_buffer_size = blk * (1024 ** 2)
-    for host in cfg.hosts.ap.values():
-        if encr == 1:
-            splice_line = "#$AWAI_SPLICE_ROUTING 0"
-            encrypt_line = "$AWAI_WAN_ENCRYPTION 1"
-            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
-        elif awai == 1:
-            splice_line = "$AWAI_SPLICE_ROUTING 1"
-            encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
-            buffer_line = f"$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
-        else:
-            splice_line = "#$AWAI_SPLICE_ROUTING 0"
-            encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
-            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
-        extra = (
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|{splice_line}|' "
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|{encrypt_line}|' "
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|{buffer_line}|' "
-            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_audit[[:space:]]+.*$|log_audit {awai_debug_log}|' "
-            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_single[[:space:]]+.*$|log_single {gridftp_server_log}|' "
-            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_AWAI_DEBUG[[:space:]]+.*$|$GLOBUS_AWAI_DEBUG {awai_debug_log}|' "
-            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_GRIDFTP_SERVER_DEBUG[[:space:]]+.*$|$GLOBUS_GRIDFTP_SERVER_DEBUG {gridftp_server_log}|' "
-        )
-        cp = run_subprocess(
-            host, None,
-            f"mkdir -p {shlex.quote(out_dir)} && "
-            f"sudo sed -i -E "
-            f"-e 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' "
-            f"{extra} "
-            f"/etc/gridftp.d/zdebug && "
-            f"sudo systemctl restart apache2.service && "
-            f"sudo systemctl restart globus-gridftp-server.service && "
-            f"sudo cat /etc/gridftp.d/zdebug ",
-            localhost=cfg.localhost
-        )
-        if check and cp.returncode != 0:
-            raise RuntimeError(
-                f"GTR: Failed changing the blocksize on {host.upper()}"
-                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-            )
-        #head = "\n".join(cp.stdout.splitlines()[:5])
-        head = "\n".join(cp.stdout.splitlines())
-        logging.debug("GTR: Gridftp splice and blocksize config on %s:\n%s", host.upper(), head)
-
-
-def logging_gridftp(cfg: Config, out_dir: str, check: bool = True) -> None:
-    audit_log = shlex.quote(f'{out_dir}/gridftp-audit.log')
-    single_log = shlex.quote(f'{out_dir}/gridftp-single.log')
-
-    for host in cfg.hosts.ep.values():
-        cp = run_subprocess(
-            host, None,
-            f"sudo sed -i -E "
-            f"-e 's|^[[:space:]]*log_audit[[:space:]]+.*$|log_audit {audit_log}|' "
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_single[[:space:]]+.*$|log_single {single_log}|' "
-            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_transfer[[:space:]]+.*$|log_transfer {transfer_log}|' "
-            f"/etc/gridftp.d/z_logging && "
-            #f"sudo systemctl restart apache2.service && "
-            f"sudo cat /etc/gridftp.d/z_logging ",
-            localhost=cfg.localhost,
-        )
-        if check and cp.returncode != 0:
-            raise RuntimeError(
-                f"GTR: Failed changing GridFTP logging paths on {host.upper()}\n"
-                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-            )
-
-
-def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
-    for host in cfg.hosts.ap.values():
-        cp = run_subprocess(
-            host, None,
-            f"mkdir -p {shlex.quote(out_dir)} && "
-            f"sudo cat /etc/gridftp.d/zdebug > {shlex.quote(out_dir)}/gridftp-stream.log ",
-            localhost=cfg.localhost
-        )
-        if check and cp.returncode != 0:
-            raise RuntimeError(
-                f"GTR: Failed changing the gridftp configuration on {host.upper()}"
-                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-            )
-        logging.debug("GTR: Recorded the Gridftp configuration on %s", host.upper())
-
-
+#-------------------------------------------------------------------------------
+# System reports
 def _sysctl_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
     keys = (
         "net.ipv4.tcp_mtu_probing",
@@ -526,17 +371,170 @@ def system_state_report(cfg: Config, out_dir: str, check: bool = True) -> None:
     _storage_report(cfg, hosts, out_dir, path=out_dir, check=check)
 
 
+#-------------------------------------------------------------------------------
+
+def make_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/temp_files") -> None:
+    host = cfg.hosts.ep.get("listener")
+    #if ("iperf" in cfg.app or "rsync" in cfg.app) and "gtr" in cfg.app:
+    cp = run_subprocess(
+        host, None,
+        f"mkdir -p {shlex.quote(file_path)} && "
+        f"fallocate -l {size}G {shlex.quote(file_path)}/{shlex.quote(temp_file)} && "
+        f"test -f {shlex.quote(file_path)}/{shlex.quote(temp_file)} && "
+        f"du -h {shlex.quote(file_path)}/{shlex.quote(temp_file)}",
+        localhost=cfg.localhost,
+    )
+    logging.info("FILE: Source file on %s: %s", host.upper(), cp.stdout.strip())
+
+
+def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
+    dest_dir = str(PurePosixPath(dest_path).parent)
+    run_subprocess(
+        host, None,
+        f"mkdir -p {shlex.quote(dest_dir)} ", #&& ",
+        localhost=cfg.localhost,
+    )
+    logging.info("RSYNC: Prepared destination on %s: file=%s", host.upper(), dest_path)
+
+
+_UUID_CANDIDATE = re.compile(r"[0-9a-fA-F-]{32,36}")
+def _parse_uid(output: str) -> str:
+    for m in _UUID_CANDIDATE.finditer(output):
+        try:
+            return str(uuid.UUID(m.group(0)))
+        except ValueError:
+            pass
+    raise RuntimeError(f"Could not find UUID in output:\n{output}")
+
+def _parse_gateway_id(output: str,  parts: list[str], *, exact: bool = False) -> str:
+    for line in output.splitlines():
+        if "|" not in line:
+            continue
+        if line.strip().startswith("---"):
+            continue
+        # first column is Display Name
+        display = line.split("|", 1)[0].strip()
+        if not all(part in display for part in parts):
+            continue
+        m = _UUID_CANDIDATE.search(line)
+        if not m:
+            raise RuntimeError(f"Matched name but no ID found on line:\n{line}")
+        return str(uuid.UUID(m.group(0)))
+    raise RuntimeError(f"No gateway row matched name={parts!r}.\nOutput:\n{output}")
+
+
+def _parse_contact_port(output: str) -> int:
+    m = re.search(
+        r"Your contact string is:\s*(?P<host>[^:\s]+)\s*:\s*(?P<port>\d+)",
+        output, flags=re.IGNORECASE
+    )
+    if not m:
+        raise RuntimeError(f"Could not find contact string / port in output:\n{output}")
+    return int(m.group("port"))
+
+#-------------------------------------------------------------------------------
+# Gridftp config and reset
+def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, check: bool = True) -> None:
+    if awai not in (0, 1):
+        raise ValueError(f"Invalid splice value: {awai}. Expected 0 or 1")
+    if encr not in (0, 1):
+        raise ValueError(f"Invalid encrypt value: {encr}. Expected 0 or 1")
+    if awai == 1 and encr == 1:
+        raise ValueError("Invalid GridFTP mode: splice=1 and encrypt=1 cannot both be enabled.")
+    globus_gridftp_debug_log = f"{out_dir}/globus-gridftp-debug.log"
+    splice_buffer_size = blk * (1024 ** 2)
+    for host in cfg.hosts.ap.values():
+        if encr == 1:
+            splice_line = "#$AWAI_SPLICE_ROUTING 0"
+            encrypt_line = "$AWAI_WAN_ENCRYPTION 1"
+            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+        elif awai == 1:
+            splice_line = "$AWAI_SPLICE_ROUTING 1"
+            encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
+            buffer_line = f"$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+        else:
+            splice_line = "#$AWAI_SPLICE_ROUTING 0"
+            encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
+            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+        extra = (
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|{splice_line}|' "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|{encrypt_line}|' "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|{buffer_line}|' "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_GRIDFTP_SERVER_DEBUG[[:space:]]+.*$|$GLOBUS_GRIDFTP_SERVER_DEBUG ALL,{globus_gridftp_debug_log},1,ALL|' "
+        )
+        cp = run_subprocess(
+            host, None,
+            f"mkdir -p {shlex.quote(out_dir)} && "
+            f"sudo sed -i -E "
+            f"-e 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' "
+            f"{extra} "
+            f"/etc/gridftp.d/zdebug && "
+            #f"sudo systemctl restart apache2.service && "
+            #f"sudo systemctl restart globus-gridftp-server.service && "
+            #f"sudo systemctl restart gridftp-server-restarter.service && "
+            f"sudo cat /etc/gridftp.d/zdebug ",
+            localhost=cfg.localhost
+        )
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"GTR: Failed changing the blocksize on {host.upper()}"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+        #head = "\n".join(cp.stdout.splitlines()[:5])
+        head = "\n".join(cp.stdout.splitlines())
+        logging.debug("GTR: Gridftp splice and blocksize config on %s:\n%s", host.upper(), head)
+
+
+def logging_gridftp(cfg: Config, out_dir: str, check: bool = True) -> None:
+    audit_log = shlex.quote(f'{out_dir}/gridftp-audit.log')
+    single_log = shlex.quote(f'{out_dir}/gridftp-single.log')
+
+    for host in cfg.hosts.ep.values():
+        cp = run_subprocess(
+            host, None,
+            f"sudo sed -i -E "
+            f"-e 's|^[[:space:]]*log_audit[[:space:]]+.*$|log_audit {audit_log}|' "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_single[[:space:]]+.*$|log_single {single_log}|' "
+            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_transfer[[:space:]]+.*$|log_transfer {transfer_log}|' "
+            f"/etc/gridftp.d/z_logging && "
+            f"sudo cat /etc/gridftp.d/z_logging ",
+            localhost=cfg.localhost,
+        )
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"GTR: Failed changing GridFTP logging paths on {host.upper()}\n"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+
+
+def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
+    for host in cfg.hosts.ap.values():
+        cp = run_subprocess(
+            host, None,
+            f"mkdir -p {shlex.quote(out_dir)} && "
+            f"sudo cat /etc/gridftp.d/zdebug > {shlex.quote(out_dir)}/gridftp-stream.log ",
+            localhost=cfg.localhost
+        )
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"GTR: Failed changing the gridftp configuration on {host.upper()}"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+        logging.debug("GTR: Recorded the Gridftp configuration on %s", host.upper())
+
+
 def restart_gridftp(cfg: Config, hosts: list[str], check: bool = True) -> None:
     # hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
     # for host in cfg.hosts.ap.values():
         cp = run_subprocess(
             host, None,
-            "sudo systemctl restart apache2.service && "
+            "sudo systemctl restart apache2.service ",
+            #"sudo systemctl restart apache2.service && "
             #"sudo systemctl restart gcs_manager.service && "
             #"sudo systemctl restart gcs_manager_assistant.service && "
-            #"sudo systemctl restart gridftp-server-restarter.service && "
-            "sudo systemctl restart globus-gridftp-server.service ",
+            #f"sudo systemctl restart globus-gridftp-server.service && "
+            #f"sudo systemctl restart gridftp-server-restarter.service ",
             localhost=cfg.localhost,
         )
         if check and cp.returncode != 0:
@@ -545,7 +543,9 @@ def restart_gridftp(cfg: Config, hosts: list[str], check: bool = True) -> None:
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
         logging.debug("GTR: Restarted gridftp on %s (%s)", host.upper(), cp.stdout.strip())
+        
 
+#-------------------------------------------------------------------------------
 
 def cleanup_iperf(cfg: Config, check: bool = True) -> None:
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
@@ -561,6 +561,48 @@ def cleanup_iperf(cfg: Config, check: bool = True) -> None:
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr} "
             )
         logging.debug("IPERF: Killed iperf on %s %s", host.upper(), cp.stdout)
+
+
+#-------------------------------------------------------------------------------
+# Statkit monitor
+def start_statkit(cfg: Config, timeout : int , app: str, out_dir: str, check: bool = True) -> None:
+    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+    for host in hosts:
+        cp = popen_subprocess(
+            host, cfg.remote_env,
+            f"mkdir -p {shlex.quote(out_dir)} && "
+            "pids=$(pgrep -d, -f globus-gridftp-server || true); "
+            "python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
+            f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} --duration {timeout} & "
+            f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ", 
+            localhost=cfg.localhost,
+        )
+        logging.debug("SYS: Started on statkit on %s %s", host.upper(), cp.stdout)
+
+
+def stop_statkit(cfg: Config) -> None:
+    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+    for host in hosts:
+        cp = popen_subprocess(
+            host, None,
+            r"pkill -TERM -f 'monitor/launcher\.py' || true",
+            localhost=cfg.localhost,
+        )
+        logging.debug("SYS: Stopped statkit on %s", host.upper())
+
+
+#-------------------------------------------------------------------------------
+# iPerf3 GST
+_STATE = re.compile(r"^\s*State:\s*(?P<state>\S+)\s*$", re.MULTILINE)
+_STATUS = re.compile(r"^\s*Status:\s*(?P<status>.+?)\s*$", re.MULTILINE)
+def _parse_status(output: str) -> tuple[str, str]:
+    m_state = _STATE.search(output)
+    if not m_state:
+        raise RuntimeError(f"Could not find State in output:\n{output}")
+    m_status = _STATUS.search(output)
+    status = m_status.group("status").strip() if m_status else ""
+    state = m_state.group("state")
+    return state, status
 
 
 def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
@@ -580,6 +622,381 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
     return out
 
 
+def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, lbl: str, timeout: int, check: bool = True) -> str:
+    cp = run_subprocess(
+        cfg.localhost, cfg.local_env,
+        "globus streams tunnel create "
+        "--lifetime-minutes 360 -v "
+        f"--label {shlex.quote(lbl)} "
+        f"{shlex.quote(initiator_id)} {shlex.quote(listener_id)} ",
+        localhost=cfg.localhost,
+        #timeout=timeout,
+    )
+    if check and cp.returncode != 0:
+        raise RuntimeError(
+            f"LOCAL: Failed creating the streams tunnel on {cfg.localhost.upper()}\n"
+            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+        )
+    id = _parse_uid(cp.stdout + "\n" + cp.stderr)
+    logging.debug("LOCAL: Created the stream tunnel on %s with id: %s", cfg.localhost.upper(), id)
+    return id
+
+
+def init_listener_env(cfg: Config, listener_ip: str, tunnel_id: str, check: bool = True) -> None:
+    host = cfg.hosts.ep["listener"]
+    cp = run_subprocess(
+        host, cfg.remote_env,
+        "globus-streams environment initialize "
+        f"--listener-contact-string {listener_ip}:{cfg.tunnel_port} "
+        f"{shlex.quote(tunnel_id)}",
+        localhost=cfg.localhost,
+    )
+    if check and cp.returncode != 0:
+        raise RuntimeError(
+            f"IPERF: Failed initializing listener environment on {host.upper()}\n"
+            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+        )
+    logging.debug("IPERF: Listener environment initializing on %s:\n%s", host.upper(), cp.stdout.strip())
+
+
+def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> int:
+    host = cfg.hosts.ep["initiator"]
+    cp = run_subprocess(
+        host, cfg.remote_env,
+        f"globus-streams environment initialize {shlex.quote(tunnel_id)} ",
+        localhost=cfg.localhost,
+    )
+    if check and cp.returncode != 0:
+        raise RuntimeError(
+            f"IPERF: Failed initializing initiator environment on {host.upper()}\n"
+            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+        )
+    logging.debug("IPERF: Initiator environment initializing on %s:\n%s", host.upper(), cp.stdout.strip())
+    combined = cp.stdout + "\n" + cp.stderr
+    return _parse_contact_port(combined)
+
+
+def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 100, wait: int = 5) -> tuple[str, str]:
+    for ret in range(1, retry + 1):
+        cp = run_subprocess(
+            cfg.localhost, cfg.local_env,
+            f"globus streams tunnel show {shlex.quote(tunnel_id)}",
+            localhost=cfg.localhost,
+            check=False,
+        )
+        state, status = _parse_status((cp.stdout + "\n" + cp.stderr).strip())   # AWAITING_LISTENER, ACTIVE, STOPPING, STOPPED
+        if state == stat:
+            logging.info("GST: Tunnel State %s | Status %s", state, status)
+            return state, status
+        if ret < retry:
+            logging.info(
+                "GST: Waiting for tunnel to reache %s. Current state: %s. Retry: %d / %d next try in %d secs", 
+                stat, state, ret, retry, wait)
+            time.sleep(wait)
+    raise RuntimeError(
+        f"GST: The tunnel state is {state} and did not change to {stat} after "
+        f"{retry} attempts over about {max(0, retry - 1) * wait}s."
+    )
+
+
+def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
+    cp = run_subprocess(
+        cfg.localhost, cfg.local_env,
+        f"globus streams tunnel stop {shlex.quote(tunnel_id)}",
+        localhost=cfg.localhost,
+        check=False,
+    )
+    logging.info("LOCAL: Stoping the stream tunnel %s", tunnel_id)
+
+
+def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
+    cp = run_subprocess(
+        cfg.localhost, cfg.local_env,
+        f"globus streams tunnel delete {shlex.quote(tunnel_id)}",
+        localhost=cfg.localhost,
+        check=False,
+    )
+    logging.info("LOCAL: Deleted the streams tunnel %s", tunnel_id)
+
+
+def _get_numa_node(cfg: Config, host: str, dev: str) -> tuple[int, str]:
+    cp = run_subprocess(
+        host,
+        None,
+        f"dev={shlex.quote(dev)}; "
+        f"numa_file=/sys/class/net/$dev/device/numa_node; "
+        f"if [ ! -f \"$numa_file\" ]; then "
+        f"  echo \"NUMA: missing $numa_file\" >&2; "
+        f"  exit 1; "
+        f"fi; "
+        f"node=$(cat \"$numa_file\"); "
+        f"if [ \"$node\" -lt 0 ]; then "
+        f"  echo \"NUMA: device $dev has unknown numa_node=$node\" >&2; "
+        f"  exit 1; "
+        f"fi; "
+        f"cpulist_file=/sys/devices/system/node/node$node/cpulist; "
+        f"if [ ! -f \"$cpulist_file\" ]; then "
+        f"  echo \"NUMA: missing $cpulist_file\" >&2; "
+        f"  exit 1; "
+        f"fi; "
+        f"cpus=$(cat \"$cpulist_file\"); "
+        f"if [ -z \"$cpus\" ]; then "
+        f"  echo \"NUMA: empty CPU list for node $node\" >&2; "
+        f"  exit 1; "
+        f"fi; "
+        f"echo \"$node $cpus\"",
+        localhost=cfg.localhost,
+    )
+    lines = cp.stdout.strip().splitlines()
+    if not lines:
+        raise RuntimeError(
+            f"NUMA: Empty NUMA output on {host} for dev={dev}\n"
+            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+        )
+    last_line = lines[-1]
+    parts = last_line.split(maxsplit=1)
+    if len(parts) != 2:
+        raise RuntimeError(
+            f"NUMA: Could not parse NUMA output on {host} for dev={dev}\n"
+            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+        )
+    numa_node = int(parts[0])
+    numa_cpus = parts[1].strip()
+    logging.debug(
+        "NUMA: host=%s dev=%s node=%s cpus=%s",
+        host.upper(),
+        dev,
+        numa_node,
+        numa_cpus,
+    )
+    return numa_node, numa_cpus
+
+
+def _take_cpus(cpulist: str, count: int) -> str:
+    cpus: list[int] = []
+
+    for part in cpulist.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start, end = map(int, part.split("-", 1))
+            cpus.extend(range(start, end + 1))
+        else:
+            cpus.append(int(part))
+    if count <= 0:
+        raise ValueError(f"CPU count must be positive, got {count}")
+    if len(cpus) < count:
+        raise RuntimeError(
+            f"Not enough CPUs in NUMA cpulist. requested={count}, available={len(cpus)}, cpulist={cpulist}"
+        )
+    selected = cpus[:count]
+    return ",".join(str(cpu) for cpu in selected)
+
+
+def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: str, app: str, numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
+#def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: str, app: str, 
+    # parallel: int, dev: str, 
+    # numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
+    extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)}" if cfg.test == "transfer" else ""
+    # numa_node, numa_cpus = _get_numa_node(cfg, host, dev) if numa == "numa" else (None, "")
+    # #cpu_count = max(2, parallel)
+    # #selected_cpus = _take_cpus(numa_cpus, cpu_count) if numa == "numa" else ""
+    # numa_prefix = (
+    #     f"numactl --physcpubind={shlex.quote(numa_cpus)} --membind={numa_node} "
+    #     #f"numactl --physcpubind={shlex.quote(selected_cpus)} --membind={numa_node} "
+    #     if numa == "numa"
+    #     else ""
+    # )
+    cp = popen_subprocess(
+        host, cfg.remote_env,
+        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
+        f"globus-streams-launch -d "
+        f"-p {port} {shlex.quote(tunnel_id)} "  #f"numactl --cpunodebind=0 --preferred=0 "
+        f"iperf3 -s -p {port} -1 --timestamps --forceflush "    #f"iperf3 -s -B {cfg.listener_ip} -p {port} -1 --timestamps  --forceflush "
+        f"{extra_arg} "
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json  & "
+        "echo $! " ,
+        localhost=cfg.localhost,
+    )
+    logging.info("IPERF: Started iperf3 server on host %s", host.upper())
+
+
+def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, 
+    parallel: int, arg: int, file: str, app: str, numa: str, out_dir: str, timeout: int, 
+    temp_dir: str = "/tmp/temp_files", check: bool = True) -> subprocess.CompletedProcess[str]:
+    size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
+    #extra_arg = f"-Z -R -n {arg}G -F {shlex.quote(temp_dir)}/{shlex.quote(file)} " if cfg.test == "transfer" else f"-P {parallel} -i 10 -O 10 -Z -R -t {arg} "    
+    # extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+    extra_arg = f"-n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+    cp = run_subprocess(
+        host, cfg.remote_env,
+        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
+        "globus-streams-launch -d "
+        f"{shlex.quote(tunnel_id)} "                                                    #f"numactl --cpunodebind=0 --preferred=0 "
+        f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "                 #f"iperf3 -c globus.{shlex.quote(tunnel_id)} -B {cfg.initiator_ip} -p {contact_port} "
+        f"-Z -R -P {parallel} --timestamps --forceflush "
+        f"{extra_arg} "
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json && "
+        f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
+        localhost=cfg.localhost,
+        timeout=timeout,
+    )
+    n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
+    #tail = "\n".join(cp.stdout.splitlines()[-n:])
+    tail = "\n".join(cp.stdout.splitlines()[-29:-21])
+    logging.info("IPERF: iPerf3 log on %s %s", host.upper(), tail)
+    return cp
+
+
+#-------------------------------------------------------------------------------
+# iPerf3 Base
+def base_start_iperf_server(cfg: Config, host: str, port: int, file: str, app: str, numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
+    extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)}" if cfg.test == "transfer" else ""
+    cp = popen_subprocess(
+        host, None,
+        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "    #f"numactl --cpunodebind=1 --preferred=1 "
+        f"iperf3 -s -p {port} -1 --timestamps --forceflush "                            #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
+        f"{extra_arg} "
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json  & "
+        "echo $! " ,
+        localhost=cfg.localhost,
+    )
+    logging.info("BASE: Started iperf3 server on %s", host.upper())
+
+
+def base_start_iperf_client(
+    cfg: Config, host: str, listener_pub: str, port: int, parallel: int, arg: int, 
+    file: str, app: str, numa: str, out_dir: str, timeout: int, temp_dir: str = "/tmp/temp_files", check: bool = True
+    ) -> subprocess.CompletedProcess[str]:  
+    size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
+    #extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+    extra_arg = f"-n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+    cp = run_subprocess(
+        host, cfg.remote_env,
+        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
+        f"iperf3 -c {listener_pub} -p {port} "                                          #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
+        f"-Z -R -P {parallel} --timestamps --forceflush "
+        f"{extra_arg} "
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json && "
+        f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
+        localhost=cfg.localhost,
+        timeout= timeout,
+    )
+    n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
+    #tail = "\n".join(cp.stdout.splitlines()[-n:])
+    tail = "\n".join(cp.stdout.splitlines()[-29:-21])
+    logging.info("BASE: iPerf3 log on %s %s", host.upper(), tail)
+    return cp
+
+
+#-------------------------------------------------------------------------------
+# Rsync
+def start_rsync_daemon(
+    cfg: Config, dst_host: str, numa: str, out_dir: str, port: int, timeout: int, 
+    module_name: str = "transfer", module_path: str = "/tmp/temp_file", check: bool = True,
+    ) -> None:
+    cp = run_subprocess(
+        dst_host, None,
+        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(module_path)} && "
+        
+        f"if [ -f {shlex.quote(module_path)}/rsyncd.pid ] && "
+        f"kill -0 $(cat {shlex.quote(module_path)}/rsyncd.pid) 2>/dev/null; then "
+        f"  echo 'stopping existing rsync daemon from pid file'; "
+        f"  kill $(cat {shlex.quote(module_path)}/rsyncd.pid) 2>/dev/null || true; "
+        f"  sleep 1; "
+        f"fi; "
+        f"rm -f {shlex.quote(module_path)}/rsyncd.pid "
+        f"{shlex.quote(module_path)}/rsyncd.lock; "
+        f"cat > {shlex.quote(module_path)}/rsyncd.conf <<'EOF'\n"
+        f"use chroot = no\n"
+        f"max connections = 64\n"
+        f"pid file = {module_path}/rsyncd.pid\n"
+        f"log file = {module_path}/rsyncd.log\n"
+        f"lock file = {module_path}/rsyncd.lock\n"
+        f"timeout = 0\n"
+        #f"socket options = SO_SNDBUF=134217728 SO_RCVBUF=134217728\n"
+        f"\n"
+        f"[{module_name}]\n"
+        f"    path = {module_path}\n"
+        f"    read only = false\n"
+        f"    list = yes\n"
+        f"EOF\n"
+        
+        f"rsync --daemon --config={shlex.quote(module_path)}/rsyncd.conf --port={port}; ",
+        localhost=cfg.localhost,
+        timeout=timeout,
+    )
+    logging.info("RSYNC: Started rsync daemon on %s:%s", dst_host.upper(), port)
+    logging.debug("RSYNC stdout:\n%s", cp.stdout)
+
+
+def start_rsync_transfer(
+    cfg: Config, src_host: str, dst_host: str, file: str, numa: str, out_dir: str, port: int, timeout: int,
+    module_name: str = "transfer", module_path: str = "/tmp/temp_file", check: bool = True,
+    ) -> None:
+    #rsync_url = f"rsync://{cfg.initiator_ip}:{port}/{module_name}/{file}"
+    rsync_url = f"rsync://{cfg.initiator_pub}:{port}/{module_name}/{file}"
+    cp = run_subprocess(
+        src_host, None, 
+        f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+        f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync-time.log "
+        f"rsync -avvv --info=progress2,stats2 --no-compress --no-checksum "
+        f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
+        f"{shlex.quote(module_path)}/{shlex.quote(file)} {shlex.quote(rsync_url)} "
+        f"--log-file={shlex.quote(out_dir)}/rsync-log.log; "
+        f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
+        f"}} 2>&1 | tr '\\r' '\\n' "
+        f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
+        f"| tee {shlex.quote(out_dir)}/rsync.log",
+        localhost=cfg.localhost,
+        timeout=timeout,
+    )
+    logging.info(
+        "RSYNC: Completed rsync deamon transfer of %s from %s to rsync://%s:%s/%s/%s",
+        file, src_host.upper(), dst_host, port, module_name, file,
+    )
+    logging.debug("RSYNC stdout:\n%s", cp.stdout)
+
+
+def start_rsync_ssh(
+    cfg: Config, src_host: str, dst_host: str, file: str, numa: str, out_dir: str, port: int, timeout: int,
+    module_path: str = "/tmp/temp_file", check: bool = True,
+    ) -> None:
+    file_path = f"{module_path}/{file}"
+    cp = run_subprocess(
+        src_host, None,
+        f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+        f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync-time.log "
+        f"rsync -avvv --info=progress2,stats2 --mkpath --no-compress --no-checksum "
+        f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
+        f"{shlex.quote(file_path)} "
+        f"-e {shlex.quote('ssh -T -o Compression=no -o StrictHostKeyChecking=no')} "
+        #f"-e {shlex.quote('ssh -p {port} -T -o Compression=no -o StrictHostKeyChecking=no')} "
+        #f"{shlex.quote(file_path)} {shlex.quote(dst_host)}:{shlex.quote(file_path)} "
+        f"{shlex.quote(dst_host)}:{shlex.quote(file_path)} "
+        f"--log-file={shlex.quote(out_dir)}/rsync-log.log; "
+        f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
+        f"}} 2>&1 | tr '\\r' '\\n' "
+        f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
+        f"| tee {shlex.quote(out_dir)}/rsync.log",
+        localhost=cfg.localhost,
+        timeout=timeout
+    )
+    logging.info("RSYNC: Completed rsync ssh transfer of %s from %s to %s/%s",
+        file, src_host.upper(), dst_host, file_path,
+    )
+    logging.debug("RSYNC stdout:\n%s", cp.stdout)
+
+
+#-------------------------------------------------------------------------------
+# Globus Transfer
 def _parse_collection_uid(output: str,  parts: list[str], *, exact: bool = False) -> str:
     for line in output.splitlines():
         if "|" not in line:
@@ -640,8 +1057,7 @@ def parse_size_to_bytes(size: str) -> int:
 def start_globus_transfer(
     cfg: Config, src_cid: str, dst_cid: str, label: str, 
     # contact_port: int, parallel: int, 
-    size: int, 
-        encr: int, file: str, app: str, out_dir: str,  timeout: int,
+    size: int, encr: int, file: str, app: str, out_dir: str,  timeout: int,
     # module_name: str = "transfer", module_path: str = "/tmp/temp_files", 
     check: bool = True,
     ) -> None:
@@ -677,337 +1093,8 @@ def start_globus_transfer(
     logging.debug("GTR stdout:\n%s", cp.stdout)
 
 
-
-def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, lbl: str, timeout: int, check: bool = True) -> str:
-    cp = run_subprocess(
-        cfg.localhost, cfg.local_env,
-        "globus streams tunnel create "
-        "--lifetime-minutes 360 -v "
-        f"--label {shlex.quote(lbl)} "
-        f"{shlex.quote(initiator_id)} {shlex.quote(listener_id)} ",
-        localhost=cfg.localhost,
-        #timeout=timeout,
-    )
-    if check and cp.returncode != 0:
-        raise RuntimeError(
-            f"LOCAL: Failed creating the streams tunnel on {cfg.localhost.upper()}\n"
-            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-        )
-    id = _parse_uid(cp.stdout + "\n" + cp.stderr)
-    logging.debug("LOCAL: Created the stream tunnel on %s with id: %s", cfg.localhost.upper(), id)
-    return id
-
-
-def start_statkit(cfg: Config, timeout : int , app: str, out_dir: str, check: bool = True) -> None:
-    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
-    for host in hosts:
-        cp = popen_subprocess(
-            host, cfg.remote_env,
-            f"mkdir -p {shlex.quote(out_dir)} && "
-            "pids=$(pgrep -d, -f globus-gridftp-server || true); "
-            "python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
-            f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} --duration {timeout} & "
-            f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ", 
-            localhost=cfg.localhost,
-        )
-        logging.debug("SYS: Started on statkit on %s %s", host.upper(), cp.stdout)
-
-
-def init_listener_env(cfg: Config, listener_ip: str, tunnel_id: str, check: bool = True) -> None:
-    host = cfg.hosts.ep["listener"]
-    cp = run_subprocess(
-        host, cfg.remote_env,
-        "globus-streams environment initialize "
-        f"--listener-contact-string {listener_ip}:{cfg.tunnel_port} "
-        f"{shlex.quote(tunnel_id)}",
-        localhost=cfg.localhost,
-    )
-    if check and cp.returncode != 0:
-        raise RuntimeError(
-            f"IPERF: Failed initializing listener environment on {host.upper()}\n"
-            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-        )
-    logging.debug("IPERF: Listener environment initializing on %s:\n%s", host.upper(), cp.stdout.strip())
-
-
-def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> int:
-    host = cfg.hosts.ep["initiator"]
-    cp = run_subprocess(
-        host, cfg.remote_env,
-        f"globus-streams environment initialize {shlex.quote(tunnel_id)} ",
-        localhost=cfg.localhost,
-    )
-    if check and cp.returncode != 0:
-        raise RuntimeError(
-            f"IPERF: Failed initializing initiator environment on {host.upper()}\n"
-            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-        )
-    logging.debug("IPERF: Initiator environment initializing on %s:\n%s", host.upper(), cp.stdout.strip())
-    combined = cp.stdout + "\n" + cp.stderr
-    return _parse_contact_port(combined)
-
-
-def stop_statkit(cfg: Config) -> None:
-    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
-    for host in hosts:
-        cp = popen_subprocess(
-            host, None,
-            r"pkill -TERM -f 'monitor/launcher\.py' || true",
-            localhost=cfg.localhost,
-        )
-        logging.debug("SYS: Stopped statkit on %s", host.upper())
-
-
-_STATE = re.compile(r"^\s*State:\s*(?P<state>\S+)\s*$", re.MULTILINE)
-_STATUS = re.compile(r"^\s*Status:\s*(?P<status>.+?)\s*$", re.MULTILINE)
-def _parse_status(output: str) -> tuple[str, str]:
-    m_state = _STATE.search(output)
-    if not m_state:
-        raise RuntimeError(f"Could not find State in output:\n{output}")
-    m_status = _STATUS.search(output)
-    status = m_status.group("status").strip() if m_status else ""
-    state = m_state.group("state")
-    return state, status
-
-
-def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 100, wait: int = 5) -> tuple[str, str]:
-    for ret in range(1, retry + 1):
-        cp = run_subprocess(
-            cfg.localhost, cfg.local_env,
-            f"globus streams tunnel show {shlex.quote(tunnel_id)}",
-            localhost=cfg.localhost,
-            check=False,
-        )
-        state, status = _parse_status((cp.stdout + "\n" + cp.stderr).strip())   # AWAITING_LISTENER, ACTIVE, STOPPING, STOPPED
-        if state == stat:
-            logging.info("GST: Tunnel State %s | Status %s", state, status)
-            return state, status
-        if ret < retry:
-            logging.info(
-                "GST: Waiting for tunnel to reache %s. Current state: %s. Retry: %d / %d next try in %d secs", 
-                stat, state, ret, retry, wait)
-            time.sleep(wait)
-    raise RuntimeError(
-        f"GST: The tunnel state is {state} and did not change to {stat} after "
-        f"{retry} attempts over about {max(0, retry - 1) * wait}s."
-    )
-
-
-def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
-    cp = run_subprocess(
-        cfg.localhost, cfg.local_env,
-        f"globus streams tunnel stop {shlex.quote(tunnel_id)}",
-        localhost=cfg.localhost,
-        check=False,
-    )
-    logging.info("LOCAL: Stoping the stream tunnel %s", tunnel_id)
-
-
-def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
-    cp = run_subprocess(
-        cfg.localhost, cfg.local_env,
-        f"globus streams tunnel delete {shlex.quote(tunnel_id)}",
-        localhost=cfg.localhost,
-        check=False,
-    )
-    logging.info("LOCAL: Deleted the streams tunnel %s", tunnel_id)
-
-
-def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: str, app: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
-    extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} " if cfg.test == "transfer" else ""
-    cp = popen_subprocess(
-        host, cfg.remote_env,
-        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "
-        #f"numactl --cpunodebind=0 --preferred=0 "
-        f"globus-streams-launch -d "
-        f"-p {port} {shlex.quote(tunnel_id)} "
-        f"numactl --cpunodebind=0 --preferred=0 "
-        f"iperf3 -s -p {port} -1 --timestamps  --forceflush "
-        #f"iperf3 -s -B {cfg.listener_ip} -p {port} -1 --timestamps  --forceflush "
-        f"{extra_arg} "
-        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json & "
-        "echo $! " ,
-        localhost=cfg.localhost,
-    )
-    logging.info("IPERF: Started iperf3 server on host %s", host.upper())
-
-
-def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, 
-    parallel: int, arg: int, file: str, app: str, out_dir: str, timeout: int, 
-    temp_dir: str = "/tmp/temp_files", check: bool = True) -> subprocess.CompletedProcess[str]:
-    size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
-    #extra_arg = f"-Z -R -n {arg}G -F {shlex.quote(temp_dir)}/{shlex.quote(file)} " if cfg.test == "transfer" else f"-P {parallel} -i 10 -O 10 -Z -R -t {arg} "    
-    # extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
-    extra_arg = f"-n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
-    cp = run_subprocess(
-        host, cfg.remote_env,
-        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "
-        #f"numactl --cpunodebind=0 --preferred=0 "
-        "globus-streams-launch "    #-d "
-        f"{shlex.quote(tunnel_id)} "
-        f"numactl --cpunodebind=0 --preferred=0 "
-        f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "
-        #f"iperf3 -c globus.{shlex.quote(tunnel_id)} -B {cfg.initiator_ip} -p {contact_port} "
-        f"-Z -R -P {parallel} --timestamps  --forceflush "
-        f"{extra_arg} "
-        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json && "
-        f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
-        localhost=cfg.localhost,
-        timeout=timeout,
-    )
-    n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
-    #tail = "\n".join(cp.stdout.splitlines()[-n:])
-    tail = "\n".join(cp.stdout.splitlines()[-29:-21])
-    logging.info("IPERF: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
-    return cp
-
-
-def base_start_iperf_server(cfg: Config, host: str, port: int, file: str, app: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
-    extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} " if cfg.test == "transfer" else ""
-    cp = popen_subprocess(
-        host, None,
-        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "
-        f"numactl --cpunodebind=1 --preferred=1 "
-        f"iperf3 -s -p {port} -1 --timestamps --forceflush "
-        #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
-        f"{extra_arg} "
-        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json  & "
-        "echo $! " ,
-        localhost=cfg.localhost,
-    )
-    logging.info("BASE: Started iperf3 server on %s", host.upper())
-
-
-def base_start_iperf_client(
-    cfg: Config, host: str, listener_pub: str, port: int, parallel: int, arg: int, 
-    file: str, app: str, out_dir: str, timeout: int, temp_dir: str = "/tmp/temp_files", check: bool = True
-    ) -> subprocess.CompletedProcess[str]:  
-    size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
-    #extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
-    extra_arg = f"-n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
-    cp = run_subprocess(
-        host, cfg.remote_env,
-        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "
-        f"numactl --cpunodebind=0 --preferred=0 "
-        f"iperf3 -c {listener_pub} -p {port} "
-        #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
-        f"-Z -R -P {parallel} --timestamps --forceflush "
-        f"{extra_arg} "
-        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json && "
-        f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
-        localhost=cfg.localhost,
-        timeout= timeout,
-    )
-    n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
-    #tail = "\n".join(cp.stdout.splitlines()[-n:])
-    tail = "\n".join(cp.stdout.splitlines()[-29:-21])
-    logging.info("BASE: iPerf3 log (when -J is not set) on %s %s", host.upper(), tail)
-    return cp
-
-
-def start_rsync_daemon(
-    cfg: Config, dst_host: str, out_dir: str, port: int, timeout: int, 
-    module_name: str = "transfer", module_path: str = "/tmp/temp_file", check: bool = True,
-    ) -> None:
-    cp = run_subprocess(
-        dst_host, None,
-        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(module_path)} && "
-        
-        f"if [ -f {shlex.quote(module_path)}/rsyncd.pid ] && "
-        f"kill -0 $(cat {shlex.quote(module_path)}/rsyncd.pid) 2>/dev/null; then "
-        f"  echo 'stopping existing rsync daemon from pid file'; "
-        f"  kill $(cat {shlex.quote(module_path)}/rsyncd.pid) 2>/dev/null || true; "
-        f"  sleep 1; "
-        f"fi; "
-        f"rm -f {shlex.quote(module_path)}/rsyncd.pid "
-        f"{shlex.quote(module_path)}/rsyncd.lock; "
-        f"cat > {shlex.quote(module_path)}/rsyncd.conf <<'EOF'\n"
-        f"use chroot = no\n"
-        f"max connections = 64\n"
-        f"pid file = {module_path}/rsyncd.pid\n"
-        f"log file = {module_path}/rsyncd.log\n"
-        f"lock file = {module_path}/rsyncd.lock\n"
-        f"timeout = 0\n"
-        #f"socket options = SO_SNDBUF=134217728 SO_RCVBUF=134217728\n"
-        f"\n"
-        f"[{module_name}]\n"
-        f"    path = {module_path}\n"
-        f"    read only = false\n"
-        f"    list = yes\n"
-        f"EOF\n"
-        
-        f"rsync --daemon --config={shlex.quote(module_path)}/rsyncd.conf --port={port}; ",
-        localhost=cfg.localhost,
-        timeout=timeout,
-    )
-    logging.info("RSYNC: Started rsync daemon on %s:%s", dst_host.upper(), port)
-    logging.debug("RSYNC stdout:\n%s", cp.stdout)
-
-
-def start_rsync_transfer(
-    cfg: Config, src_host: str, dst_host: str, file: str, out_dir: str, port: int, timeout: int,
-    module_name: str = "transfer", module_path: str = "/tmp/temp_file", check: bool = True,
-    ) -> None:
-    #rsync_url = f"rsync://{cfg.initiator_ip}:{port}/{module_name}/{file}"
-    rsync_url = f"rsync://{cfg.initiator_pub}:{port}/{module_name}/{file}"
-    cp = run_subprocess(
-        src_host, None, 
-        f"set +x; mkdir -p {shlex.quote(out_dir)} && "
-        f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
-        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync-time.log "
-        f"rsync -avvv --info=progress2,stats2 --no-compress --no-checksum "
-        f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
-        f"{shlex.quote(module_path)}/{shlex.quote(file)} {shlex.quote(rsync_url)} "
-        f"--log-file={shlex.quote(out_dir)}/rsync-log.log; "
-        f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
-        f"}} 2>&1 | tr '\\r' '\\n' "
-        f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
-        f"| tee {shlex.quote(out_dir)}/rsync.log",
-        localhost=cfg.localhost,
-        timeout=timeout,
-    )
-    logging.info(
-        "RSYNC: Completed rsync deamon transfer of %s from %s to rsync://%s:%s/%s/%s",
-        file, src_host.upper(), dst_host, port, module_name, file,
-    )
-    logging.debug("RSYNC stdout:\n%s", cp.stdout)
-
-
-def start_rsync_ssh(
-    cfg: Config, src_host: str, dst_host: str, file: str, out_dir: str, port: int, timeout: int,
-    module_path: str = "/tmp/temp_file", check: bool = True,
-    ) -> None:
-    file_path = f"{module_path}/{file}"
-    cp = run_subprocess(
-        src_host, None,
-        f"set +x; mkdir -p {shlex.quote(out_dir)} && "
-        f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
-        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync-time.log "
-        f"rsync -avvv --info=progress2,stats2 --mkpath --no-compress --no-checksum "
-        f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
-        f"{shlex.quote(file_path)} "
-        f"-e {shlex.quote('ssh -T -o Compression=no -o StrictHostKeyChecking=no')} "
-        #f"-e {shlex.quote('ssh -p {port} -T -o Compression=no -o StrictHostKeyChecking=no')} "
-        #f"{shlex.quote(file_path)} {shlex.quote(dst_host)}:{shlex.quote(file_path)} "
-        f"{shlex.quote(dst_host)}:{shlex.quote(file_path)} "
-        f"--log-file={shlex.quote(out_dir)}/rsync-log.log; "
-        f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
-        f"}} 2>&1 | tr '\\r' '\\n' "
-        f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
-        f"| tee {shlex.quote(out_dir)}/rsync.log",
-        localhost=cfg.localhost,
-        timeout=timeout
-    )
-    logging.info("RSYNC: Completed rsync ssh transfer of %s from %s to %s/%s",
-        file, src_host.upper(), dst_host, file_path,
-    )
-    logging.debug("RSYNC stdout:\n%s", cp.stdout)
-
-
+#-------------------------------------------------------------------------------
+# Ping
 def record_ping(cfg: Config, host: str, dest_ip: str, app: str, out_dir: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     cp = run_subprocess(
         host, None,
