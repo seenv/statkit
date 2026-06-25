@@ -32,7 +32,7 @@ def _parse_str_list(s: str) -> list[str]:
 
 
 def _parse_app_list(s: str) -> list[str]:
-    valid_apps = {"iperf", "base", "rsync", "gtr"}
+    valid_apps = {"iperf", "ibase", "rsync", "rbase", "gtr"}
     apps = _parse_str_list(s)
     invalid = sorted(set(apps) - valid_apps)
     if invalid:
@@ -124,7 +124,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--sleep", type=int, default=5)
 
-    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,base,rsync,gtr")
+    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,rsync,rbase,gtr")
     parser.add_argument("--encrypt", action="store_true", help="Encryption is tested with splice disabled")
     parser.add_argument("--splice", type=_parse_int_list, default=[0])
     parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])

@@ -567,11 +567,17 @@ def cleanup_iperf(cfg: Config, check: bool = True) -> None:
 # Statkit monitor
 def start_statkit(cfg: Config, timeout : int , app: str, out_dir: str, check: bool = True) -> None:
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+    # proc_patterns = [
+    #     "globus-gridftp-server",
+    #     #"rsync",
+    #     #"iperf3",
+    #     #"apache2",
+    # ]
     for host in hosts:
         cp = popen_subprocess(
             host, cfg.remote_env,
             f"mkdir -p {shlex.quote(out_dir)} && "
-            "pids=$(pgrep -d, -f globus-gridftp-server || true); "
+            "pids=$(pgrep -d, -f globus-gridftp-server || true); "  #f"pids=$(pgrep -d, -f {shlex.quote(pattern_expr)} || true); "
             "python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
             f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} --duration {timeout} & "
             f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ", 
@@ -642,12 +648,12 @@ def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, lbl: str, tim
     return id
 
 
-def init_listener_env(cfg: Config, listener_ip: str, tunnel_id: str, check: bool = True) -> None:
+def init_listener_env(cfg: Config, listener_ip: str, tunnel_id: str, port: int, check: bool = True) -> None:
     host = cfg.hosts.ep["listener"]
     cp = run_subprocess(
         host, cfg.remote_env,
         "globus-streams environment initialize "
-        f"--listener-contact-string {listener_ip}:{cfg.tunnel_port} "
+        f"--listener-contact-string {listener_ip}:{port} "
         f"{shlex.quote(tunnel_id)}",
         localhost=cfg.localhost,
     )
@@ -794,6 +800,8 @@ def _take_cpus(cpulist: str, count: int) -> str:
     return ",".join(str(cpu) for cpu in selected)
 
 
+# -------------------------------------------------------------------------------
+# iPerf3 GST
 def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: str, app: str, numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
 #def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: str, app: str, 
     # parallel: int, dev: str, 
@@ -812,7 +820,7 @@ def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: 
         host, cfg.remote_env,
         f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
-        f"globus-streams-launch -d "
+        f"globus-streams-launch "
         f"-p {port} {shlex.quote(tunnel_id)} "  #f"numactl --cpunodebind=0 --preferred=0 "
         f"iperf3 -s -p {port} -1 --timestamps --forceflush "    #f"iperf3 -s -B {cfg.listener_ip} -p {port} -1 --timestamps  --forceflush "
         f"{extra_arg} "
@@ -834,7 +842,7 @@ def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int
         host, cfg.remote_env,
         f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
-        "globus-streams-launch -d "
+        "globus-streams-launch "
         f"{shlex.quote(tunnel_id)} "                                                    #f"numactl --cpunodebind=0 --preferred=0 "
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "                 #f"iperf3 -c globus.{shlex.quote(tunnel_id)} -B {cfg.initiator_ip} -p {contact_port} "
         f"-Z -R -P {parallel} --timestamps --forceflush "
@@ -853,7 +861,7 @@ def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int
 
 #-------------------------------------------------------------------------------
 # iPerf3 Base
-def base_start_iperf_server(cfg: Config, host: str, port: int, file: str, app: str, numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
+def start_iperf_server_base(cfg: Config, host: str, port: int, file: str, app: str, numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
     extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)}" if cfg.test == "transfer" else ""
     cp = popen_subprocess(
         host, None,
@@ -868,7 +876,7 @@ def base_start_iperf_server(cfg: Config, host: str, port: int, file: str, app: s
     logging.info("BASE: Started iperf3 server on %s", host.upper())
 
 
-def base_start_iperf_client(
+def start_iperf_client_base(
     cfg: Config, host: str, listener_pub: str, port: int, parallel: int, arg: int, 
     file: str, app: str, numa: str, out_dir: str, timeout: int, temp_dir: str = "/tmp/temp_files", check: bool = True
     ) -> subprocess.CompletedProcess[str]:  
@@ -895,15 +903,13 @@ def base_start_iperf_client(
 
 
 #-------------------------------------------------------------------------------
-# Rsync
-def start_rsync_daemon(
-    cfg: Config, dst_host: str, numa: str, out_dir: str, port: int, timeout: int, 
-    module_name: str = "transfer", module_path: str = "/tmp/temp_file", check: bool = True,
-    ) -> None:
+# Rsync helpers
+def stop_rsync_daemon(
+    cfg: Config, host: str,
+    module_path: str = "/tmp/temp_files",
+    check: bool = True) -> None:
     cp = run_subprocess(
-        dst_host, None,
-        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(module_path)} && "
-        
+        host, None,
         f"if [ -f {shlex.quote(module_path)}/rsyncd.pid ] && "
         f"kill -0 $(cat {shlex.quote(module_path)}/rsyncd.pid) 2>/dev/null; then "
         f"  echo 'stopping existing rsync daemon from pid file'; "
@@ -911,7 +917,111 @@ def start_rsync_daemon(
         f"  sleep 1; "
         f"fi; "
         f"rm -f {shlex.quote(module_path)}/rsyncd.pid "
-        f"{shlex.quote(module_path)}/rsyncd.lock; "
+        f"{shlex.quote(module_path)}/rsyncd.lock; ",
+        localhost=cfg.localhost
+    )
+
+    if check and cp.returncode != 0:
+        raise RuntimeError(
+            f"RSYNC: Failed killing rsync daemon on {host.upper()}\n "
+            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr} "
+        )
+    logging.debug("RSYNC: Killed rsync daemon on %s %s", host.upper(), cp.stdout)
+
+
+#-------------------------------------------------------------------------------
+# Rsync GST
+def start_rsync_daemon_gst(
+    cfg: Config, src_host: str,
+    port: int, tunnel_id: str, 
+    numa: str, out_dir: str, timeout: int, 
+    app: str, 
+    module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
+    ) -> None:
+
+    cp = run_subprocess(
+        src_host, None,
+        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(module_path)} && "
+
+        f"cat > {shlex.quote(module_path)}/rsyncd.conf <<'EOF'\n"
+        f"use chroot = no\n"
+        f"max connections = 64\n"
+        f"pid file = {module_path}/rsyncd.pid\n"
+        f"log file = {module_path}/rsyncd.log\n"
+        f"lock file = {module_path}/rsyncd.lock\n"
+        f"timeout = 0\n"
+        f"\n"
+        f"[{module_name}]\n"
+        f"    path = {module_path}\n"
+        f"    read only = false\n"
+        f"    list = yes\n"
+        f"EOF\n"
+
+        f"globus-streams-launch -p {port} {shlex.quote(tunnel_id)} "
+        f"rsync --daemon vvv --config={shlex.quote(module_path)}/rsyncd.conf --port={port} "
+        f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-daemon.log; ",
+        localhost=cfg.localhost,
+        timeout=timeout,
+    )
+    logging.info("RGST: Started rsync daemon on %s:%s", src_host.upper(), port)
+    logging.debug("RGST stdout:\n%s", cp.stdout)
+
+
+def start_rsync_transfer_gst(
+    cfg: Config, src_host: str, dst_host: str, 
+    tunnel_id, port: int, parallel, arg,
+    file: str, numa: str, out_dir: str, timeout: int,
+    app: str, 
+    module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
+    ) -> None:
+    #rsync_url = f"rsync://{cfg.initiator_pub}:{port}/{module_name}/{file}"
+    rsync_url = f"rsync://globus.{tunnel_id}:{port}/{module_name}/{file}"
+    logging.info("\n\n RSYNC URL: %s\n\n", rsync_url)
+    cp = run_subprocess(
+        dst_host, None, 
+        f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+        f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "
+        f"globus-streams-launch {shlex.quote(tunnel_id)} "  
+        f"rsync -avvv --info=progress2,stats2 --no-compress --no-checksum "
+        f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
+        f"{shlex.quote(rsync_url)} {shlex.quote(module_path)}/{shlex.quote(file)} "
+        f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-log.log; "
+        f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
+        f"}} 2>&1 | tr '\\r' '\\n' "
+        f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
+        f"| tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log",
+        localhost=cfg.localhost,
+        timeout=timeout,
+    )
+    logging.info(
+        "RGST: Completed rsync daemon transfer from %s to %s/%s",
+        #src_host.upper(), dst_host.upper(), port, module_name, file,
+        rsync_url, module_path, file,
+    )
+    logging.debug("RSYNC stdout:\n%s", cp.stdout)
+
+
+#-------------------------------------------------------------------------------
+# Rsync Base
+def start_rsync_daemon_base(
+    cfg: Config, src_host: str, numa: str, out_dir: str, port: int, timeout: int, 
+    app: str, 
+    module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
+    ) -> None:
+    cp = run_subprocess(
+        src_host, None,
+        f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(module_path)} && "
+        
+        # f"if [ -f {shlex.quote(module_path)}/rsyncd.pid ] && "
+        # f"kill -0 $(cat {shlex.quote(module_path)}/rsyncd.pid) 2>/dev/null; then "
+        # f"  echo 'stopping existing rsync daemon from pid file'; "
+        # f"  kill $(cat {shlex.quote(module_path)}/rsyncd.pid) 2>/dev/null || true; "
+        # f"  sleep 1; "
+        # f"fi; "
+        # f"rm -f {shlex.quote(module_path)}/rsyncd.pid "
+        # f"{shlex.quote(module_path)}/rsyncd.lock; "
+    
         f"cat > {shlex.quote(module_path)}/rsyncd.conf <<'EOF'\n"
         f"use chroot = no\n"
         f"max connections = 64\n"
@@ -927,43 +1037,49 @@ def start_rsync_daemon(
         f"    list = yes\n"
         f"EOF\n"
         
-        f"rsync --daemon --config={shlex.quote(module_path)}/rsyncd.conf --port={port}; ",
+        #f"rsync --daemon --config={shlex.quote(module_path)}/rsyncd.conf --port={port}; ",
+        f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd.conf --port={port} "
+        f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-daemon.log; ",
         localhost=cfg.localhost,
         timeout=timeout,
     )
-    logging.info("RSYNC: Started rsync daemon on %s:%s", dst_host.upper(), port)
+    logging.info("RSYNC: Started rsync daemon on %s:%s", src_host.upper(), port)
     logging.debug("RSYNC stdout:\n%s", cp.stdout)
 
 
-def start_rsync_transfer(
+def start_rsync_transfer_base(
     cfg: Config, src_host: str, dst_host: str, file: str, numa: str, out_dir: str, port: int, timeout: int,
+    app: str, 
     module_name: str = "transfer", module_path: str = "/tmp/temp_file", check: bool = True,
     ) -> None:
     #rsync_url = f"rsync://{cfg.initiator_ip}:{port}/{module_name}/{file}"
-    rsync_url = f"rsync://{cfg.initiator_pub}:{port}/{module_name}/{file}"
+    rsync_url = f"rsync://{cfg.listener_pub}:{port}/{module_name}/{file}"
     cp = run_subprocess(
-        src_host, None, 
+        dst_host, None, 
         f"set +x; mkdir -p {shlex.quote(out_dir)} && "
         f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
-        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync-time.log "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "
         f"rsync -avvv --info=progress2,stats2 --no-compress --no-checksum "
         f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
-        f"{shlex.quote(module_path)}/{shlex.quote(file)} {shlex.quote(rsync_url)} "
-        f"--log-file={shlex.quote(out_dir)}/rsync-log.log; "
+        #f"{shlex.quote(module_path)}/{shlex.quote(file)} {shlex.quote(rsync_url)} " # rsync://globus.${TUNNEL_ID}:3096/transfer/20G.bin /tmp/temp_files/20G.bin 
+        f"{shlex.quote(rsync_url)} {shlex.quote(module_path)}/{shlex.quote(file)} "
+        f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-log.log; "
         f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
         f"}} 2>&1 | tr '\\r' '\\n' "
         f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
-        f"| tee {shlex.quote(out_dir)}/rsync.log",
+        f"| tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log",
         localhost=cfg.localhost,
         timeout=timeout,
     )
     logging.info(
-        "RSYNC: Completed rsync deamon transfer of %s from %s to rsync://%s:%s/%s/%s",
-        file, src_host.upper(), dst_host, port, module_name, file,
+        "RSYNC: Completed rsync daemon transfer of %s from %s to rsync://%s:%s/%s/%s",
+        file, src_host.upper(), dst_host.upper(), port, module_name, file,
     )
     logging.debug("RSYNC stdout:\n%s", cp.stdout)
 
 
+# -------------------------------------------------------------------------------
+# Rsync SSH 
 def start_rsync_ssh(
     cfg: Config, src_host: str, dst_host: str, file: str, numa: str, out_dir: str, port: int, timeout: int,
     module_path: str = "/tmp/temp_file", check: bool = True,
@@ -973,7 +1089,7 @@ def start_rsync_ssh(
         src_host, None,
         f"set +x; mkdir -p {shlex.quote(out_dir)} && "
         f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
-        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync-time.log "
+        f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync_ssh-time.log "
         f"rsync -avvv --info=progress2,stats2 --mkpath --no-compress --no-checksum "
         f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
         f"{shlex.quote(file_path)} "
@@ -981,11 +1097,11 @@ def start_rsync_ssh(
         #f"-e {shlex.quote('ssh -p {port} -T -o Compression=no -o StrictHostKeyChecking=no')} "
         #f"{shlex.quote(file_path)} {shlex.quote(dst_host)}:{shlex.quote(file_path)} "
         f"{shlex.quote(dst_host)}:{shlex.quote(file_path)} "
-        f"--log-file={shlex.quote(out_dir)}/rsync-log.log; "
+        f"--log-file={shlex.quote(out_dir)}/rsync_ssh-log.log; "
         f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
         f"}} 2>&1 | tr '\\r' '\\n' "
         f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
-        f"| tee {shlex.quote(out_dir)}/rsync.log",
+        f"| tee {shlex.quote(out_dir)}/rsync_ssh.log",
         localhost=cfg.localhost,
         timeout=timeout
     )
@@ -1079,6 +1195,8 @@ def start_globus_transfer(
         f"--no-verify-checksum --fail-on-quota-errors "
         f"--format unix --jmespath task_id --notify off "
         f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt 2> {shlex.quote(out_dir)}/{shlex.quote(app)}_submit_stderr.log && "
+        #f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt "
+        #f"2> >(tee {shlex.quote(out_dir)}/{shlex.quote(app)}_submit_stderr.log >&2) && "
         f"TASK_ID=$(cat {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt | tr -d '\"[:space:]') && "
         f"echo \"TASK_ID=$TASK_ID\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
         f"globus task wait \"$TASK_ID\" 2>&1 | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
