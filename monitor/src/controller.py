@@ -19,8 +19,10 @@ from .net_monitor import NetMonitorConfig, make_net_monitor
 # talk to John to make sure of the processes to parse 
 # TODO: some reports are more the durations!!!!!!!
 
-def _run_cpu(out_path: str, out_thread_path: str, interval_s: float, pids: Optional[Sequence[int]], stop: Event) -> None:
-    mon = CpuMonitor(CpuMonitorConfig(interval_s=interval_s, pids=pids), out_path, out_thread_path=out_thread_path)
+# def _run_cpu(out_path: str, out_thread_path: str, interval_s: float, pids: Optional[Sequence[int]], stop: Event) -> None:
+#     mon = CpuMonitor(CpuMonitorConfig(interval_s=interval_s, pids=pids), out_path, out_thread_path=out_thread_path)
+def _run_cpu(out_path: str, out_thread_path: str, out_core_path: str, interval_s: float, pids: Optional[Sequence[int]], stop: Event) -> None:
+    mon = CpuMonitor(CpuMonitorConfig(interval_s=interval_s, pids=pids), out_path, out_thread_path=out_thread_path, out_core_path=out_core_path)
     try:
         while not stop.is_set():
             mon.sample_once()
