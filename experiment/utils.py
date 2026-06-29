@@ -1086,17 +1086,22 @@ def start_rsync_ssh(
     ) -> None:
     file_path = f"{module_path}/{file}"
     cp = run_subprocess(
-        src_host, None,
+        #src_host, None,
+        dst_host, None,
         f"set +x; mkdir -p {shlex.quote(out_dir)} && "
         f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync_ssh-time.log "
         f"rsync -avvv --info=progress2,stats2 --mkpath --no-compress --no-checksum "
         f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
-        f"{shlex.quote(file_path)} "
+        ##f"{shlex.quote(file_path)} "
         f"-e {shlex.quote('ssh -T -o Compression=no -o StrictHostKeyChecking=no')} "
         #f"-e {shlex.quote('ssh -p {port} -T -o Compression=no -o StrictHostKeyChecking=no')} "
         #f"{shlex.quote(file_path)} {shlex.quote(dst_host)}:{shlex.quote(file_path)} "
-        f"{shlex.quote(dst_host)}:{shlex.quote(file_path)} "
+        ##f"{shlex.quote(dst_host)}:{shlex.quote(file_path)} "
+        
+        f"{shlex.quote(src_host)}:{shlex.quote(file_path)} "
+        f"{shlex.quote(file_path)} "
+        
         f"--log-file={shlex.quote(out_dir)}/rsync_ssh-log.log; "
         f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
         f"}} 2>&1 | tr '\\r' '\\n' "

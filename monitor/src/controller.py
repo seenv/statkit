@@ -106,7 +106,9 @@ class Controller:
         self.procs = [
             Process(
                 target=_run_cpu,
-                kwargs={"out_path": str(out / f"{prefix}cpu.csv"), "out_thread_path": str(out / f"{prefix}cpu_thread.csv"), 
+                kwargs={"out_path": str(out / f"{prefix}cpu.csv"),
+                        "out_thread_path": str(out / f"{prefix}cpu_thread.csv"),
+                        "out_core_path": str(out / f"{prefix}cpu_core.csv"),
                         "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "stop": self.stop},
                 daemon=True
             ),

@@ -142,9 +142,20 @@ def _expand_pid_tree(root_pids: Sequence[int], *, recursive: bool = True) -> lis
     return sorted(out)
 
 
+# @dataclass
+# class CpuMonitorConfig:
+#     interval_s: float = 1.0   # TODO: try a test with setting the interval to duration      
+#     pids: Optional[Sequence[int]] = None
+
+#     # tree handling
+#     include_children: bool = True
+#     recursive_children: bool = True
+
+#     # per thread logging, writes in another csv
+#     record_threads: bool = True
 @dataclass
 class CpuMonitorConfig:
-    interval_s: float = 1.0   # TODO: try a test with setting the interval to duration      
+    interval_s: float = 1.0
     pids: Optional[Sequence[int]] = None
 
     # tree handling
@@ -153,6 +164,10 @@ class CpuMonitorConfig:
 
     # per thread logging, writes in another csv
     record_threads: bool = True
+
+    # per logical CPU logging, writes in another csv
+    record_cpus: bool = True
+    active_cpu_threshold_pct: float = 5.0
 
 class CpuMonitor:
     """
@@ -166,9 +181,18 @@ class CpuMonitor:
     # TODO: get the per processes stats, and specifically for active processes 
     # plus the ones from input pids or names
     #def __init__(self, cfg: CpuMonitorConfig, out_csv_path: str) -> None:
-    def __init__(self, cfg: CpuMonitorConfig, out_cpu_path: str, *,
-        out_thread_path: str, flush_every: int = 1) -> None:
-        
+    
+    # def __init__(self, cfg: CpuMonitorConfig, out_cpu_path: str, *,
+    #     out_thread_path: str, flush_every: int = 1) -> None:
+    def __init__(
+        self,
+        cfg: CpuMonitorConfig,
+        out_cpu_path: str,
+        *,
+        out_thread_path: str,
+        out_core_path: str,
+        flush_every: int = 1,
+    ) -> None:
         self.cfg = cfg
         self.logger = CsvLogger(
             #out_csv_path
@@ -232,7 +256,24 @@ class CpuMonitor:
             ],
             flush_every=flush_every,
         )
-        
+
+        self.core_logger: Optional[CsvLogger] = None
+        if cfg.record_cpus:
+            if not out_core_path:
+                raise ValueError("record_cpus=True requires out_core_path")
+            self.core_logger = CsvLogger(
+                out_core_path,
+                fieldnames=[
+                    "ts_wall_s",
+                    "ts_mono_s",
+                    "dt_s",
+                    "cpu_id",
+                    "cpu_percent",
+                    "active",
+                ],
+                flush_every=flush_every,
+            )
+
         self.thread_logger: Optional[CsvLogger] = None
         if cfg.record_threads:
             if not out_thread_path:
@@ -251,7 +292,7 @@ class CpuMonitor:
                 ],
                 flush_every=flush_every,
             )
-        
+
         self._cpu_logical = psutil.cpu_count(logical=True) or 0
         self._cpu_physical = psutil.cpu_count(logical=False) or 0
 
@@ -318,12 +359,22 @@ class CpuMonitor:
     #     except Exception:
     #         return None, None, None
 
+    # def close(self) -> None:
+    #     try:
+    #         self.logger.close()
+    #     finally:
+    #         if self.thread_logger is not None:
+    #             self.thread_logger.close()
     def close(self) -> None:
         try:
             self.logger.close()
         finally:
-            if self.thread_logger is not None:
-                self.thread_logger.close()
+            try:
+                if self.thread_logger is not None:
+                    self.thread_logger.close()
+            finally:
+                if self.core_logger is not None:
+                    self.core_logger.close()
 
     def _current_pid_list(self) -> list[int]:
         if not self.cfg.pids:
@@ -418,6 +469,29 @@ class CpuMonitor:
             except Exception:
                 continue
 
+    def _write_core_usage(self, per_core: Sequence[float], dt_s: float, ts_wall: float, ts_mono: float) -> None:
+        """
+        Write one row per logical CPU for this sample.
+
+        psutil.cpu_percent(..., percpu=True) returns usage per logical CPU:
+          CPU 0, CPU 1, ..., CPU N-1
+        """
+        if self.core_logger is None:
+            return
+        if dt_s <= 0:
+            return
+
+        for cpu_id, cpu_pct in enumerate(per_core):
+            cpu_pct = float(cpu_pct)
+
+            self.core_logger.write({
+                "ts_wall_s": ts_wall,
+                "ts_mono_s": ts_mono,
+                "dt_s": float(dt_s),
+                "cpu_id": int(cpu_id),
+                "cpu_percent": cpu_pct,
+                "active": int(cpu_pct >= self.cfg.active_cpu_threshold_pct),
+            })
 
     def _write_thread_deltas(self, pid_list: list[int], dt_s: float, ts_wall: float, ts_mono: float) -> None:
         if self.thread_logger is None:
@@ -496,6 +570,9 @@ class CpuMonitor:
         cpu_max_core = (max(cores)) if cores else None
         # total over same interval: mean over cores
         cpu_total_pct = cpu_mean_core
+
+        if cores:
+            self._write_core_usage(cores, dt, t0_wall, t1_mono)
 
         # saturation
         la1, la5, la15 = self._loadavg()

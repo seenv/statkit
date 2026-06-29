@@ -67,6 +67,8 @@ class Config:
     test: TestMode
     
     numactl: Sequence[str]
+    tcp_buffer: str
+    ring_buffer: str
 
     localhost: str
     hosts: Hosts
@@ -106,6 +108,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
 
     parser.add_argument("--numactl", type=_parse_numa_list, required=True, help="Experimetns with numa tunning enabled")
+    parser.add_argument("--tcp-buffer", type=str, required=True)#, help="Experimetns with numa tunning enabled")
+    parser.add_argument("--ring-buffer", type=str, required=True)#, help="Experimetns with numa tunning enabled")
 
     parser.add_argument("--initiator-ap", type=str, default="chi-trans-consap")
     parser.add_argument("--listener-ap", default="chi-trans-prodap")
@@ -148,6 +152,8 @@ def build_config(args: argparse.Namespace) -> Config:
         test=cast(TestMode, args.test),
         
         numactl=args.numactl,
+        tcp_buffer=args.tcp_buffer,
+        ring_buffer=args.ring_buffer,
 
         localhost=args.userhost,
         hosts=Hosts(
