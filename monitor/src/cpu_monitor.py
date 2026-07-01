@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple
+#from typing import Dict, Optional, Sequence, Tuple
+from pathlib import Path
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 import psutil
 
@@ -142,6 +144,44 @@ def _expand_pid_tree(root_pids: Sequence[int], *, recursive: bool = True) -> lis
     return sorted(out)
 
 
+def _safe_filename_part(s: str) -> str:
+    """
+    Make process-name strings safe to use as CSV filenames.
+    """
+    out = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in s.strip())
+    return out or "process"
+
+
+def _find_pids_by_names(names: Sequence[str]) -> dict[str, list[int]]:
+    """
+    Find matching PIDs every sample.
+
+    Matching rule:
+      - exact match against process name, OR
+      - substring match against full command line
+
+    This lets monitoring work even when the process does not exist at controller start.
+    """
+    wanted = [n.strip() for n in names if n and n.strip()]
+    out: dict[str, set[int]] = {n: set() for n in wanted}
+    if not wanted:
+        return {}
+
+    for p in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            pid = int(p.info["pid"])
+            pname = p.info.get("name") or ""
+            cmdline = " ".join(p.info.get("cmdline") or [])
+
+            for wanted_name in wanted:
+                if pname == wanted_name or wanted_name in cmdline:
+                    out[wanted_name].add(pid)
+        except Exception:
+            continue
+
+    return {k: sorted(v) for k, v in out.items()}
+
+
 # @dataclass
 # class CpuMonitorConfig:
 #     interval_s: float = 1.0   # TODO: try a test with setting the interval to duration      
@@ -157,6 +197,7 @@ def _expand_pid_tree(root_pids: Sequence[int], *, recursive: bool = True) -> lis
 class CpuMonitorConfig:
     interval_s: float = 1.0
     pids: Optional[Sequence[int]] = None
+    process_names: Optional[Sequence[str]] = None
 
     # tree handling
     include_children: bool = True
@@ -274,6 +315,30 @@ class CpuMonitor:
                 flush_every=flush_every,
             )
 
+        self.proc_name_core_loggers: dict[str, CsvLogger] = {}
+        if cfg.process_names:
+            core_parent = Path(out_core_path).parent if out_core_path else Path(out_cpu_path).parent
+            for process_name in cfg.process_names:
+                process_name = process_name.strip()
+                if not process_name:
+                    continue
+                safe_process_name = _safe_filename_part(process_name)
+                self.proc_name_core_loggers[process_name] = CsvLogger(
+                    str(core_parent / f"{safe_process_name}_core.csv"),
+                    fieldnames=[
+                        "ts_wall_s",
+                        "ts_mono_s",
+                        "dt_s",
+                        "process_name",
+                        "pid",
+                        "cpu_num",
+                        "proc_cpu_sec_d",
+                        "proc_cpu_pct_total",
+                        "proc_cpu_cores_equiv",
+                    ],
+                    flush_every=flush_every,
+                )
+
         self.thread_logger: Optional[CsvLogger] = None
         if cfg.record_threads:
             if not out_thread_path:
@@ -303,7 +368,8 @@ class CpuMonitor:
         #self._prev_mono: Optional[float] = None
 
         # per pid previous cpu times: pid -> (user+system) # TODO: or just user!?
-        self._proc_prev_cpu: Dict[int, float] = {}
+        # self._proc_prev_cpu: Dict[int, float] = {}
+        self._proc_prev_cpu: Dict[Any, float] = {}
 
         # per thread previous cpu times: (pid, tid) -> (user+system)
         self._thr_prev_cpu: Dict[Tuple[int, int], float] = {}
@@ -365,6 +431,16 @@ class CpuMonitor:
     #     finally:
     #         if self.thread_logger is not None:
     #             self.thread_logger.close()
+    # def close(self) -> None:
+    #     try:
+    #         self.logger.close()
+    #     finally:
+    #         try:
+    #             if self.thread_logger is not None:
+    #                 self.thread_logger.close()
+    #         finally:
+    #             if self.core_logger is not None:
+    #                 self.core_logger.close()
     def close(self) -> None:
         try:
             self.logger.close()
@@ -373,8 +449,12 @@ class CpuMonitor:
                 if self.thread_logger is not None:
                     self.thread_logger.close()
             finally:
-                if self.core_logger is not None:
-                    self.core_logger.close()
+                try:
+                    if self.core_logger is not None:
+                        self.core_logger.close()
+                finally:
+                    for logger in self.proc_name_core_loggers.values():
+                        logger.close()
 
     def _current_pid_list(self) -> list[int]:
         if not self.cfg.pids:
@@ -493,6 +573,73 @@ class CpuMonitor:
                 "active": int(cpu_pct >= self.cfg.active_cpu_threshold_pct),
             })
 
+    def _write_process_name_cpu_rows(self, dt_s: float, ts_wall: float, ts_mono: float) -> None:
+        """
+        Write per-process-name CPU rows into separate CSV files.
+
+        Notes:
+          - This finds processes by name/cmdline on every sample, so it works
+            even if the process starts after the monitor starts.
+          - cpu_num is the last logical CPU where the process was observed.
+            It is not perfect interval-level core attribution because Linux may
+            migrate the process/thread during the interval.
+        """
+        if not self.cfg.process_names:
+            return
+        if dt_s <= 0 or self._cpu_logical <= 0:
+            return
+
+        name_to_pids = _find_pids_by_names(self.cfg.process_names)
+        live_keys: set[tuple[str, str, int]] = set()
+
+        for process_name, pid_list in name_to_pids.items():
+            logger = self.proc_name_core_loggers.get(process_name)
+            if logger is None:
+                continue
+
+            for pid in pid_list:
+                try:
+                    p = psutil.Process(pid)
+                    ct = p.cpu_times()
+                    cur = float(ct.user + ct.system)
+                    cpu_num = p.cpu_num()
+                except Exception:
+                    continue
+
+                key = ("process_name", process_name, int(pid))
+                live_keys.add(key)
+                prev = self._proc_prev_cpu.get(key)
+                self._proc_prev_cpu[key] = cur
+
+                if prev is None:
+                    continue
+                if not (cur == cur and prev == prev):  # NaN
+                    continue
+
+                d = cur - prev
+                if d < 0:
+                    continue
+
+                cores_equiv = d / dt_s
+                pct_total = (d / (dt_s * float(self._cpu_logical))) * 100.0
+
+                logger.write({
+                    "ts_wall_s": ts_wall,
+                    "ts_mono_s": ts_mono,
+                    "dt_s": float(dt_s),
+                    "process_name": process_name,
+                    "pid": int(pid),
+                    "cpu_num": int(cpu_num),
+                    "proc_cpu_sec_d": float(d),
+                    "proc_cpu_pct_total": float(pct_total),
+                    "proc_cpu_cores_equiv": float(cores_equiv),
+                })
+
+        # Remove only stale process-name keys. Keep numeric PID keys used by --pids.
+        for k in list(self._proc_prev_cpu.keys()):
+            if isinstance(k, tuple) and len(k) == 3 and k[0] == "process_name" and k not in live_keys:
+                del self._proc_prev_cpu[k]
+
     def _write_thread_deltas(self, pid_list: list[int], dt_s: float, ts_wall: float, ts_mono: float) -> None:
         if self.thread_logger is None:
             return
@@ -573,6 +720,8 @@ class CpuMonitor:
 
         if cores:
             self._write_core_usage(cores, dt, t0_wall, t1_mono)
+
+        self._write_process_name_cpu_rows(dt, t0_wall, t1_mono)
 
         # saturation
         la1, la5, la15 = self._loadavg()

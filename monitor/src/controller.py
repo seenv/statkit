@@ -21,8 +21,10 @@ from .net_monitor import NetMonitorConfig, make_net_monitor
 
 # def _run_cpu(out_path: str, out_thread_path: str, interval_s: float, pids: Optional[Sequence[int]], stop: Event) -> None:
 #     mon = CpuMonitor(CpuMonitorConfig(interval_s=interval_s, pids=pids), out_path, out_thread_path=out_thread_path)
-def _run_cpu(out_path: str, out_thread_path: str, out_core_path: str, interval_s: float, pids: Optional[Sequence[int]], stop: Event) -> None:
-    mon = CpuMonitor(CpuMonitorConfig(interval_s=interval_s, pids=pids), out_path, out_thread_path=out_thread_path, out_core_path=out_core_path)
+# def _run_cpu(out_path: str, out_thread_path: str, out_core_path: str, interval_s: float, pids: Optional[Sequence[int]], stop: Event) -> None:
+#     mon = CpuMonitor(CpuMonitorConfig(interval_s=interval_s, pids=pids), out_path, out_thread_path=out_thread_path, out_core_path=out_core_path)
+def _run_cpu(out_path: str, out_thread_path: str, out_core_path: str, interval_s: float, pids: Optional[Sequence[int]], process_names: Optional[Sequence[str]], stop: Event) -> None:
+    mon = CpuMonitor(CpuMonitorConfig(interval_s=interval_s, pids=pids, process_names=process_names), out_path, out_thread_path=out_thread_path, out_core_path=out_core_path)
     try:
         while not stop.is_set():
             mon.sample_once()
@@ -78,6 +80,7 @@ class ControllerConfig:
     interval_s: float = 1.0
     duration_s: Optional[float] = None
     pids: Optional[List[int]] = None
+    process_names: Optional[List[str]] = None
     disk_path_for_usage: str = "/"
     net_backend: str = "psutil"
     nic_include_regex: Optional[str] = None
@@ -111,7 +114,8 @@ class Controller:
                 kwargs={"out_path": str(out / f"{prefix}cpu.csv"),
                         "out_thread_path": str(out / f"{prefix}cpu_thread.csv"),
                         "out_core_path": str(out / f"{prefix}cpu_core.csv"),
-                        "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "stop": self.stop},
+                        # "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "stop": self.stop},
+                        "interval_s": self.cfg.interval_s, "pids": self.cfg.pids, "process_names": self.cfg.process_names, "stop": self.stop},
                 daemon=True
             ),
             Process(
@@ -169,6 +173,7 @@ def _parse_args(argv: Sequence[str]) -> ControllerConfig:
     ap.add_argument("--interval", type=float, default=1.0, help="Sampling interval seconds (default: 1.0)")
     ap.add_argument("--duration", type=float, default=None, help="Duration in seconds (default: run until Ctrl-C)")
     ap.add_argument("--pids", type=str, default=None, help="Comma separated PIDs for per-process aggregates")
+    ap.add_argument("--process-names", type=str, default=None, help="Comma-separated process names or cmdline substrings to monitor, e.g. iperf3,rsync,globus-streams-launch")
     ap.add_argument("--disk-path", type=str, default="/", help="Filesystem path for disk_usage (default: /)")
     ap.add_argument("--net-backend", type=str, default="psutil", choices=["psutil", "bpftrace"],
                     help="Network backend (psutil or bpftrace); bpftrace requires root + bpftrace installed")
@@ -186,11 +191,20 @@ def _parse_args(argv: Sequence[str]) -> ControllerConfig:
             if x:
                 pids.append(int(x))
 
+    process_names = None
+    if args.process_names:
+        process_names = []
+        for x in args.process_names.split(","):
+            x = x.strip()
+            if x:
+                process_names.append(x)
+
     return ControllerConfig(
         out_dir=args.out,
         interval_s=args.interval,
         duration_s=args.duration,
         pids=pids,
+        process_names=process_names,
         disk_path_for_usage=args.disk_path,
         net_backend=args.net_backend,
         nic_include_regex=args.nic_include,
