@@ -16,6 +16,8 @@ from utils import start_iperf_server_base, start_iperf_client_base
 from utils import start_rsync_daemon_gst, start_rsync_transfer_gst
 from utils import start_rsync_daemon_base, start_rsync_transfer_base
 from utils import start_rsync_ssh, stop_rsync_daemon
+from utils import create_mini_yamls, start_mini_containers, wait_finish_transfer
+from utils import stop_mini_containers, prune_mini_containers
 from utils import get_collection_id, start_globus_transfer
 from utils import system_state_report, record_ping
 
@@ -163,13 +165,14 @@ def run_iperf_base(cfg: Config, *, idx: int, total_runs: int, timeout: int,
 
 # ------------------------------------------------------------------------------
 # Rsync GST
-def run_rsync_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
+def run_rsync_gst(
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, 
     parallel: int, arg: int, 
     temp_file: str, 
     port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
     #listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int,
-    ) -> None:
+) -> None:
     print("\n")
     logging.info("----- Test %d / %d: Starting RSync GST Test -----", idx, total_runs)
     ids = get_stream_id(cfg)
@@ -223,16 +226,17 @@ def run_rsync_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
             stop_statkit(cfg)
         stop_rsync_daemon(cfg, listener_host, "/tmp/temp_files")
         stop_tunnel(cfg, tunnel_id)
-        #status_tunnel(cfg, tunnel_id, "STOPPED")
-        #delete_tunnel(cfg, tunnel_id)
+        status_tunnel(cfg, tunnel_id, "STOPPED")
+        delete_tunnel(cfg, tunnel_id)
 
 
 # ------------------------------------------------------------------------------
 # Rsync Base
-def run_rsync_base(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
+def run_rsync_base(
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
     listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int
-    ) -> None:
+) -> None:
     print("\n")
     logging.info("----- Test %d / %d: Starting RSync Direct Test -----", idx, total_runs)
     try:
@@ -276,7 +280,8 @@ def run_rsync_base(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp
 
 # ------------------------------------------------------------------------------
 # Globus Transfer
-def run_globus_transfer(cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
+def run_globus_transfer(
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
     listener_host: str, initiator_host: str, numa: str, output_dir: str, 
     arg: int, 
     encrypt: int
@@ -315,26 +320,115 @@ def run_globus_transfer(cfg: Config, *, idx: int, total_runs: int, timeout: int,
 
 
 # ------------------------------------------------------------------------------
+# APS Mini App GST
+def run_mini_gst(
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
+    parallel: int, arg: int, 
+    port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
+    #listener_host: str, initiator_host: str, numa: str, output_dir: str,
+    encrypt: int,
+) -> None:
+    print("\n")
+    logging.info("----- Test %d / %d: Starting APS mini app GST Test -----", idx, total_runs)
+    sync_tunnel_ids, data_tunnel_ids = [], []
+    sync_ports, data_ports = [], []
+    tunnels = []
+    ids = get_stream_id(cfg)
+    initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
+    for i in range(parallel):
+        logging.info("MGST: Creating the tunnels on Localhost")
+        sync_label = f"{cfg.lease.replace(' ', '_')}-{cfg.test.replace(' ', '_')}-idx{idx}-tot{total_runs}-sync{i}"
+        sync_tunnel_ids.append(start_tunnel(cfg, initiator_stream_id, listener_stream_id, sync_label, timeout))
+        data_label = f"{cfg.lease.replace(' ', '_')}-{cfg.test.replace(' ', '_')}-idx{idx}-tot{total_runs}-data{i}"
+        data_tunnel_ids.append(start_tunnel(cfg, initiator_stream_id, listener_stream_id, data_label, timeout))
+    tunnels = sync_tunnel_ids + data_tunnel_ids
+    try:
+        #for tunnel in tunnels:
+        for sync, data in zip(sync_tunnel_ids, data_tunnel_ids):
+            logging.info("MGST: Waiting for tunnels to get activated")
+            #status_tunnel(cfg, tunnel, "AWAITING_LISTENER")
+            status_tunnel(cfg, sync, "AWAITING_LISTENER")
+            status_tunnel(cfg, data, "AWAITING_LISTENER")
+            
+        if not cfg.is_test:
+            logging.info("MGST: Starting statkit monitoring")
+            start_statkit(cfg, timeout, "mini_gst", output_dir)   #size as duration which will be * 60s
+            time.sleep(cfg.sleep)
+
+        # init listener env 
+        # for sync, data in zip(sync_tunnel_ids, data_tunnel_ids):
+        #     logging.info("RGST: Bringing up the tunnel on Listener AP")
+        #     init_listener_env(cfg, cfg.listener_ip, sync, cfg.mini_sync[i])
+        #     init_listener_env(cfg, cfg.listener_ip, data, cfg.mini_data[i])
+        for i, (sync, data) in enumerate(zip(sync_tunnel_ids, data_tunnel_ids)):
+            logging.info("MGST: Bringing up the tunnels on Listener AP")
+            init_listener_env(cfg, cfg.listener_ip, sync, cfg.mini_sync + i)
+            init_listener_env(cfg, cfg.listener_ip, data, cfg.mini_data + i)
+            
+            # waiting till the tunnel gets activated
+            status_tunnel(cfg, sync, "ACTIVE")
+            status_tunnel(cfg, data, "ACTIVE")
+            
+            # init initiator env + discover contact port
+            logging.info("MGST: Bringing up the tunnel on Initiator AP")
+            sync_ports.append(init_initiator_env(cfg, sync))
+            data_ports.append(init_initiator_env(cfg, data))
+        
+        # start aps mini app containers
+        # # for now and delete later:
+        # ports, tunnel_ids = [contact_port], [tunnel_id]
+        logging.info("MGST: Creating APS mini app YAML files")
+        #create_mini_yamls(cfg, cfg.mini_ports, sync_ports, sync_tunnel_ids, data_ports, data_tunnel_ids, parallel, temp_file, numa, output_dir, timeout, module_path="/tmp/temp_files")
+        create_mini_yamls(cfg, sync_ports, sync_tunnel_ids, data_ports, data_tunnel_ids, parallel, temp_file, numa, output_dir, timeout, module_path="/tmp/temp_files")
+        logging.info("MGST: Starting the APS mini app containers on the endpoints")
+        start_mini_containers(cfg, parallel, "mini_gst", output_dir, timeout)
+
+        if cfg.test == "transfer":
+            wait_finish_transfer(cfg, parallel,"mini_gst", output_dir, timeout)
+            stop_mini_containers(cfg, parallel,"mini_gst", output_dir, timeout)
+        else:
+            time.sleep(arg)
+            stop_mini_containers(cfg, parallel,"mini_gst", output_dir, timeout)
+
+        if not cfg.is_test:
+            logging.info("MGST: Recording RTT")        # it will run on the client
+            #record_ping(cfg, initiator_host, cfg.listener_ip, "iperf_gst", output_dir)
+            record_ping(cfg, initiator_host, cfg.listener_pub, "mini_gst", output_dir)
+
+    except Exception as e:
+        raise RuntimeError(f"MGST: Runtime Error: {e}") from e
+
+    finally:
+        if not cfg.is_test:
+            logging.info("MGST: Stopping statkit monitoring")
+            stop_statkit(cfg)
+        stop_mini_containers(cfg, parallel, "mini_gst", output_dir, timeout)
+        prune_mini_containers(cfg, parallel, "mini_gst", output_dir, timeout)
+        # for i, tunnel_id in enumerate(sync_tunnel_ids, data_tunnel_ids):
+        for tunnel_id in tunnels:
+            stop_tunnel(cfg, tunnel_id)
+        for tunnel_id in tunnels:
+            status_tunnel(cfg, tunnel_id, "STOPPED")
+            delete_tunnel(cfg, tunnel_id)
+
+# ------------------------------------------------------------------------------
+# APS Mini App Base        
+def run_mini_base(
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
+) -> None:
+    print("\n")
+    logging.info("----- Test %d / %d: Starting APS Mini App Base Test -----", idx, total_runs)
+    pass
+
+
+
+# ------------------------------------------------------------------------------
 # Main
 def experiment_main(cfg: Config) -> None:
     blocks = cfg.blocks
     parallels = cfg.parallels if cfg.test == "stream" else [1]
     args = cfg.time_frames if cfg.test == "stream" else cfg.file_sizes
     numactl = cfg.numactl
-    # splices = cfg.splice
-    # encrypts = cfg.encrypt
-    # runs = cfg.run_num
-    # test_config = (
-    #     (block, parallel, arg, splice, encrypt, run)
-    #     for block in blocks
-    #     for parallel in parallels
-    #     for arg in args
-    #     for splice in splices
-    #     for encrypt in encrypts
-    #     for run in range(1, runs + 1)
-    # )
-    # last_block, last_splice, last_encrypt= None, None, None
-    # total_runs =  len(blocks) * len(parallels) * len(args) * len(splices) * len(encrypts) * len(cfg.app) * runs
     net_modes = build_net_modes(cfg.splice, cfg.encrypt)
     runs = cfg.run_num
 
@@ -359,11 +453,6 @@ def experiment_main(cfg: Config) -> None:
     )
 
     total_tests = total_runs * len(cfg.app)
-
-    # if not cfg.is_test:
-    #     logging.info("SYS: Recording the system reports")
-    #     sys_report_dir = str(Path(cfg.report_dir) / "sys-info")
-    #     system_state_report(cfg, sys_report_dir)
 
     for idx, (numa, block, parallel, arg, splice, encrypt, run) in enumerate(test_config, start=1):
         print("\n")
@@ -474,4 +563,26 @@ def experiment_main(cfg: Config) -> None:
                 arg=arg, encrypt=encrypt,
             )
             #time.sleep(cfg.sleep)
+
+        #if "imini" in cfg.app and cfg.test == "stream":
+        if "imini" in cfg.app:
+            run_mini_gst(
+                cfg,
+                idx=idx,
+                total_runs=total_runs,
+                timeout=timeout,
+                temp_file=temp_file,
+                parallel=parallel,
+                arg=arg,
+                port=cfg.tunnel_port,
+                listener_host=cfg.hosts.ep["listener"],
+                initiator_host=cfg.hosts.ep["initiator"],
+                numa=numa,
+                output_dir=output_dir,
+                encrypt=encrypt,
+            )
+            
+        # if "mini" in cfg.app:
+        #     run_mini_base()
+
         time.sleep(cfg.sleep)
