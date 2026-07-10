@@ -32,7 +32,7 @@ def _parse_str_list(s: str) -> list[str]:
 
 
 def _parse_app_list(s: str) -> list[str]:
-    valid_apps = {"iperf", "ibase", "rsync", "rbase", "gtr"}
+    valid_apps = {"iperf", "ibase", "rsync", "rbase", "gtr", "mini", "mbase"}
     apps = _parse_str_list(s)
     invalid = sorted(set(apps) - valid_apps)
     if invalid:
@@ -81,6 +81,9 @@ class Config:
     encrypt_port: int
     direct_port: int
     rsync_port: int
+    mini_port: int
+    mbase_port: int
+    tomo_file: str
 
     sleep: int
 
@@ -125,10 +128,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--encrypt-port", type=int, default=49995)
     parser.add_argument("--direct-port", type=int, default=49999)
     parser.add_argument("--rsync-port", type=int, default=49998)
-
+    parser.add_argument("--mini-port", type=int, default=49950)
+    parser.add_argument("--mbase-port", type=int, default=49970)
+    parser.add_argument("--tomo-file", type=str, default="tomo_00058_all_subsampled1p_s1079s1081.h5")
+    # parser.add_argument("--tomo-file", type=str, default="tomo_00058.h5")
+    
     parser.add_argument("--sleep", type=int, default=5)
 
-    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,rsync,rbase,gtr")
+    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,rsync,rbase,gtr,mini,mbase")
     parser.add_argument("--encrypt", action="store_true", help="Encryption is tested with splice disabled")
     parser.add_argument("--splice", type=_parse_int_list, default=[0])
     parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])
@@ -175,6 +182,9 @@ def build_config(args: argparse.Namespace) -> Config:
         encrypt_port=args.encrypt_port,
         direct_port=args.direct_port,
         rsync_port=args.rsync_port,
+        mini_port=args.mini_port,
+        mbase_port=args.mbase_port,
+        tomo_file=args.tomo_file,
 
         sleep=args.sleep,
 

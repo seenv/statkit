@@ -423,14 +423,22 @@ def _parse_gateway_id(output: str,  parts: list[str], *, exact: bool = False) ->
     raise RuntimeError(f"No gateway row matched name={parts!r}.\nOutput:\n{output}")
 
 
-def _parse_contact_port(output: str) -> int:
+def _parse_contact_port(output: str) -> tuple[int, str, int]:
     m = re.search(
         r"Your contact string is:\s*(?P<host>[^:\s]+)\s*:\s*(?P<port>\d+)",
         output, flags=re.IGNORECASE
     )
     if not m:
         raise RuntimeError(f"Could not find contact string / port in output:\n{output}")
-    return int(m.group("port"))
+    mm = re.search(
+            r"^connector_contact_string\s*=\s*(?P<host>[^:\s]+)\s*:\s*(?P<port>\d+)\s*$",
+            output,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+    if not mm:
+            raise RuntimeError(f"Could not find connector_contact_string in output:\n{output}")
+    
+    return int(m.group("port")), mm.group("host"), int(mm.group("port"))
 
 #-------------------------------------------------------------------------------
 # Gridftp config and reset
@@ -669,7 +677,9 @@ def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> int:
     host = cfg.hosts.ep["initiator"]
     cp = run_subprocess(
         host, cfg.remote_env,
-        f"globus-streams environment initialize {shlex.quote(tunnel_id)} ",
+        #f"globus-streams environment initialize {shlex.quote(tunnel_id)} ",
+        f"globus-streams environment initialize {shlex.quote(tunnel_id)} && "
+        f"cat $HOME/.globus/streams/{shlex.quote(tunnel_id)}.conf ",
         localhost=cfg.localhost,
     )
     if check and cp.returncode != 0:
@@ -1230,20 +1240,63 @@ def record_ping(cfg: Config, host: str, dest_ip: str, app: str, out_dir: str, ch
 
 #-------------------------------------------------------------------------------
 # Mini-app
+# def extract_connector_contact_string(conf_text: str) -> str:
+#     for line in conf_text.splitlines():
+#         if line.startswith("connector_contact_string="):
+#             return line.split("=", 1)[1].strip()
+#     raise ValueError("connector_contact_string not found")
+def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
+    for line in conf_text.splitlines():
+        if line.startswith("connector_contact_string="):
+            value = line.split("=", 1)[1].strip()
+            ip, port = value.rsplit(":", 1)
+            return ip, int(port)
+    raise ValueError("connector_contact_string not found")
+
+# #def _daq_service(tunnel_id: str, file: str, i: int) -> str:
+# def _daq_service(sync_port: int, data_port: int, file: str, i: int) -> str:
+#     return f"""
+#   daq-{i}:
+#     image: seenv/aps-mini-apps-daq:latest
+#     network_mode: host
+#     command: python /aps-mini-apps/build/python/streamer-daq/DAQStream.py --mode 1 --simulation_file {file} --d_iteration 100 --publisher_addr tcp://*:{data_port} --iteration_sleep=0 --projection_sleep=0 --synch_addr tcp://*:{sync_port} --synch_count 1"""
+#
+# def _dist_service(sync_port: int, sync_tunnel_id: str, data_tunnel_id: str, data_port:int, i: int) -> str:
+#     return f"""
+#   dist-{i}:
+#     image: seenv/aps-mini-apps-dist:latest
+#     network_mode: host
+#     command: python /aps-mini-apps/build/python/streamer-dist/ModDistStreamPubDemo.py --data_source_addr tcp://globus.{data_tunnel_id}:{data_port} --data_source_synch_addr tcp://globus.{sync_tunnel_id}:{sync_port} --cast_to_float32 --normalize --my_distributor_addr tcp://*:4200{i} --beg_sinogram 1000 --num_sinograms 2 --num_columns 2560"""
+#
+# # def _sirt_service(data_tunnel_id: str, data_port:int) -> str:
+# #     return f"""
+# #   sirt-{i}:
+# #     image: seenv/aps-mini-apps-dist:latest
+# #     network_mode: host
+# #     command: /aps-mini-apps/build/bin/sirt_stream --write-freq 4 --dest-host {data_tunnel_id} --dest-port {data_port} --window-iter 1 --window-step 1 --window-length 4 -t 2 -c 1427 --pub-addr tcp://*:53000"""
+# def _sirt_service(data_tunnel_id: str, data_port:int, i: int) -> str:
+#     return f"""
+#   sirt-{i}:
+#     image: seenv/aps-mini-apps-dist:latest
+#     network_mode: host
+#     command: /aps-mini-apps/build/bin/sirt_stream --write-freq 4 --dest-host localhost --dest-port 4200{i} --window-iter 1 --window-step 1 --window-length 4 -t 2 -c 1427 --pub-addr tcp://*:5300{i}"""
+
 #def _daq_service(tunnel_id: str, file: str, i: int) -> str:
-def _daq_service(sync_port: int, data_port: int, file: str, i: int) -> str:
+def _daq_service(port: int, file: str, i: int) -> str:
     return f"""
   daq-{i}:
     image: seenv/aps-mini-apps-daq:latest
     network_mode: host
-    command: python /aps-mini-apps/build/python/streamer-daq/DAQStream.py --mode 1 --simulation_file {file} --d_iteration 100 --publisher_addr tcp://*:{data_port} --iteration_sleep=0 --projection_sleep=0 --synch_addr tcp://*:{sync_port} --synch_count 1"""
+    command: python /aps-mini-apps/build/python/streamer-daq/DAQStream.py --mode 1 --simulation_file /aps-mini-apps/data/{file} --d_iteration 100 --publisher_addr tcp://*:{port} --iteration_sleep=0 --projection_sleep=0 --synch_count 1"""
 
-def _dist_service(sync_port: int, sync_tunnel_id: str, data_tunnel_id: str, data_port:int, i: int) -> str:
+#def _dist_service(port: int, tunnel_id: str, i: int) -> str:
+def _dist_service(init_gw_ip: str, init_gw_port: int, i: int) -> str:
     return f"""
   dist-{i}:
     image: seenv/aps-mini-apps-dist:latest
     network_mode: host
-    command: python /aps-mini-apps/build/python/streamer-dist/ModDistStreamPubDemo.py --data_source_addr tcp://globus.{data_tunnel_id}:{data_port} --data_source_synch_addr tcp://globus.{sync_tunnel_id}:{sync_port} --cast_to_float32 --normalize --my_distributor_addr tcp://*:4200{i} --beg_sinogram 1000 --num_sinograms 2 --num_columns 2560"""
+    command: python /aps-mini-apps/build/python/streamer-dist/ModDistStreamPubDemo.py --data_source_addr tcp://{init_gw_ip}:{init_gw_port} --cast_to_float32 --normalize --my_distributor_addr tcp://*:4200{i} --beg_sinogram 1000 --num_sinograms 2 --num_columns 2560"""
+    #command: python /aps-mini-apps/build/python/streamer-dist/ModDistStreamPubDemo.py --data_source_addr tcp://globus.{tunnel_id}:{port} --cast_to_float32 --normalize --my_distributor_addr tcp://*:4200{i} --beg_sinogram 1000 --num_sinograms 2 --num_columns 2560"""
 
 # def _sirt_service(data_tunnel_id: str, data_port:int) -> str:
 #     return f"""
@@ -1251,7 +1304,7 @@ def _dist_service(sync_port: int, sync_tunnel_id: str, data_tunnel_id: str, data
 #     image: seenv/aps-mini-apps-dist:latest
 #     network_mode: host
 #     command: /aps-mini-apps/build/bin/sirt_stream --write-freq 4 --dest-host {data_tunnel_id} --dest-port {data_port} --window-iter 1 --window-step 1 --window-length 4 -t 2 -c 1427 --pub-addr tcp://*:53000"""
-def _sirt_service(data_tunnel_id: str, data_port:int, i: int) -> str:
+def _sirt_service(i: int) -> str:
     return f"""
   sirt-{i}:
     image: seenv/aps-mini-apps-dist:latest
@@ -1271,14 +1324,21 @@ def _write_remote_yamls(
     check: bool = True,
 ) -> None:
     cmd_parts = [
-        f"mkdir -p {shlex.quote(module_path)} {shlex.quote(out_dir)}"
+        f"mkdir -p {shlex.quote(module_path)} {shlex.quote(out_dir)} "
     ]
 
+    # for yaml_path, yaml_text in yamls.items():
+    #     cmd_parts.append(
+    #         f"cat > {shlex.quote(yaml_path)} <<'EOF'\n"
+    #         f"{yaml_text}"
+    #         f"EOF"
+    #     )
     for yaml_path, yaml_text in yamls.items():
         cmd_parts.append(
             f"cat > {shlex.quote(yaml_path)} <<'EOF'\n"
-            f"{yaml_text}"
-            f"EOF"
+            f"{yaml_text.rstrip()}\n"
+            f"EOF\n"
+            f"cp {shlex.quote(yaml_path)} {shlex.quote(out_dir)}/"
         )
         cmd_parts.append(
             f"cp {shlex.quote(yaml_path)} {shlex.quote(out_dir)}/"
@@ -1313,9 +1373,9 @@ def _start_service_container(
     #cp = run_subprocess(
     cp = popen_subprocess(
         host, None,
+        f"cd {shlex.quote(module_path)} && " 
         #f"for i in {{1..{parallel + 1}}}; do "
         #f"docker compose -f docker-compose.{service}${{i}} up  "
-        f"cd {shlex.quote(module_path)} && " 
         f"docker compose -f docker-compose-{service}.yaml up "
         f"| awk '{{ print strftime(\"[%Y-%m-%d %H:%M:%S]\"), $0; fflush() }}' "
         f"> {shlex.quote(out_dir)}/{shlex.quote(app)}-{shlex.quote(service)}.log & ",
@@ -1328,7 +1388,6 @@ def _start_service_container(
             f"MINI: Failed creating compose files on {host.upper()}\n"
             f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
         )
-
 
 def _get_mini_containers_stats(
     cfg: Config, 
@@ -1350,32 +1409,88 @@ def _get_mini_containers_stats(
     return int(cp.stdout.strip())
 
 
+# def create_mini_yamls(
+#     cfg: Config,
+#     #ports: Sequence[int],
+#     sync_ports: Sequence[int],
+#     sync_tunnel_ids: Sequence[str],
+#     data_ports: Sequence[int],
+#     data_tunnel_ids: Sequence[str],
+#     parallel: int,
+#     file: str,
+#     numa: str,
+#     out_dir: str,
+#     timeout: int,
+#     module_path: str = "/tmp/temp_files",
+#     check: bool = True,
+# ) -> None:
+#     # if len(ports) != parallel or (len(sync_tunnel_ids) + len(data_tunnel_ids)) != parallel:
+#     if not (
+#         len(sync_ports) == parallel
+#         and len(data_ports) == parallel
+#         and len(sync_tunnel_ids) == parallel
+#         and len(data_tunnel_ids) == parallel
+#     ):
+#         raise RuntimeError(
+#             f"Expected all mini lists to have length parallel={parallel}, got "
+#             f"sync_ports={len(sync_ports)}, data_ports={len(data_ports)}, "
+#             f"sync_tunnel_ids={len(sync_tunnel_ids)}, data_tunnel_ids={len(data_tunnel_ids)}"
+#         )
+
+#     for host in cfg.hosts.ep.values():
+#         logging.debug("MGST: Creating APS mini app's YAML files on the host %s", host.upper())
+#         if host == cfg.hosts.ep["listener"]:
+#             yamls = {
+#                 f"{module_path}/docker-compose-daq.yaml": _compose_yaml([
+#                     #_daq_service(tunnel_id, file, i)
+#                     _daq_service(cfg.mini_sync + i, cfg.mini_data + i, file, i)
+#                     #for i, tunnel_id in enumerate(tunnel_ids)
+#                     for i in range(parallel)
+#                 ])
+#             }
+
+#             _write_remote_yamls(cfg, host, yamls, out_dir, module_path, timeout, check)
+
+#         elif host == cfg.hosts.ep["initiator"]:
+#             dist_services = []
+#             sirt_services = []
+
+#             # for i, tunnel_id in enumerate(tunnel_ids):
+#                 # dist_services.append(_dist_service(tunnel_id, i))
+#                 # sirt_services.append(_sirt_service(tunnel_id, ports[i]))
+#             #for i, sync_tunnel_id, sync_port, data_tunnel_id, data_port in enumerate(sync_ports, sync_tunnel_ids, data_ports, data_tunnel_ids):
+#             for i, (sync_port, sync_tunnel_id, data_port, data_tunnel_id) in enumerate(zip(sync_ports, sync_tunnel_ids, data_ports, data_tunnel_ids)):
+#                 dist_services.append(_dist_service(sync_port, sync_tunnel_id, data_tunnel_id, data_port, i))
+#                 sirt_services.append(_sirt_service(data_tunnel_id, data_port, i))
+
+#             yamls = {
+#                 f"{module_path}/docker-compose-dist.yaml": _compose_yaml(dist_services),
+#                 f"{module_path}/docker-compose-sirt.yaml": _compose_yaml(sirt_services),
+#             }
+
+#             _write_remote_yamls(cfg, host, yamls, out_dir, module_path, timeout, check)
 def create_mini_yamls(
     cfg: Config,
-    #ports: Sequence[int],
-    sync_ports: Sequence[int],
-    sync_tunnel_ids: Sequence[str],
-    data_ports: Sequence[int],
-    data_tunnel_ids: Sequence[str],
+    start_port: int,
+    initiator_gw_ip: str,
+    tunnel_ports: Sequence[int],
+    tunnel_ids: Sequence[str],
     parallel: int,
-    file: str,
     numa: str,
     out_dir: str,
     timeout: int,
+    file: str,
     module_path: str = "/tmp/temp_files",
     check: bool = True,
 ) -> None:
     # if len(ports) != parallel or (len(sync_tunnel_ids) + len(data_tunnel_ids)) != parallel:
     if not (
-        len(sync_ports) == parallel
-        and len(data_ports) == parallel
-        and len(sync_tunnel_ids) == parallel
-        and len(data_tunnel_ids) == parallel
+        len(tunnel_ports) == parallel
+        and len(tunnel_ids) == parallel
     ):
         raise RuntimeError(
             f"Expected all mini lists to have length parallel={parallel}, got "
-            f"sync_ports={len(sync_ports)}, data_ports={len(data_ports)}, "
-            f"sync_tunnel_ids={len(sync_tunnel_ids)}, data_tunnel_ids={len(data_tunnel_ids)}"
+            f"ports={len(tunnel_ports)}, sync_tunnel_ids={len(tunnel_ids)}"
         )
 
     for host in cfg.hosts.ep.values():
@@ -1384,13 +1499,13 @@ def create_mini_yamls(
             yamls = {
                 f"{module_path}/docker-compose-daq.yaml": _compose_yaml([
                     #_daq_service(tunnel_id, file, i)
-                    _daq_service(cfg.mini_sync + i, cfg.mini_data + i, file, i)
+                    _daq_service(start_port + i, file, i)
                     #for i, tunnel_id in enumerate(tunnel_ids)
                     for i in range(parallel)
                 ])
             }
 
-            _write_remote_yamls(cfg, host, yamls, out_dir, module_path, timeout, check)
+            _write_remote_yamls(cfg, host, yamls, out_dir, module_path, timeout)
 
         elif host == cfg.hosts.ep["initiator"]:
             dist_services = []
@@ -1400,16 +1515,16 @@ def create_mini_yamls(
                 # dist_services.append(_dist_service(tunnel_id, i))
                 # sirt_services.append(_sirt_service(tunnel_id, ports[i]))
             #for i, sync_tunnel_id, sync_port, data_tunnel_id, data_port in enumerate(sync_ports, sync_tunnel_ids, data_ports, data_tunnel_ids):
-            for i, (sync_port, sync_tunnel_id, data_port, data_tunnel_id) in enumerate(zip(sync_ports, sync_tunnel_ids, data_ports, data_tunnel_ids)):
-                dist_services.append(_dist_service(sync_port, sync_tunnel_id, data_tunnel_id, data_port, i))
-                sirt_services.append(_sirt_service(data_tunnel_id, data_port, i))
-
+            for i, (port, tunnel_id) in enumerate(zip(tunnel_ports, tunnel_ids)):
+                #dist_services.append(_dist_service(tunnel_id, port, i))
+                dist_services.append(_dist_service(initiator_gw_ip, port, i))
+                sirt_services.append(_sirt_service(i))
             yamls = {
                 f"{module_path}/docker-compose-dist.yaml": _compose_yaml(dist_services),
                 f"{module_path}/docker-compose-sirt.yaml": _compose_yaml(sirt_services),
             }
 
-            _write_remote_yamls(cfg, host, yamls, out_dir, module_path, timeout, check)
+            _write_remote_yamls(cfg, host, yamls, out_dir, module_path, timeout)
 
 
 def start_mini_containers(
@@ -1430,7 +1545,7 @@ def start_mini_containers(
         elif status == parallel and retry < retries:
             logging.debug("MINI: Started DAQ on the %s", host.upper())
             break
-        
+
     host, service = cfg.hosts.ep["initiator"], "dist"
     _start_service_container(cfg, parallel, app, out_dir, timeout, host, service)
     for retry in range(1, retries + 1):
@@ -1533,153 +1648,3 @@ def prune_mini_containers(
             else:
                 raise RuntimeError(f"MINI: Containers didn't finish after {retries * cfg.sleep} seconds on {host.capitalize()}")
     logging.info("MINI: Pruned APS mini app's containers on the endpoints")
-
-
-
-                
-        
-
-
-
-
-#-------------------------------------------------------------------------------
-# Mini-app
-# from config import Config
-# from utils import run_subprocess, sys_reload, mkdir, run_stats, get_username, traffic_ctl
-# from congestion import congestion_check, congestion_change
-# from proxy import proxy_check, proxy_change
-
-def run_mini_apps(hosts, duration, parallel, run, output_dir):
-    try:
-        for host in hosts.values():
-            #output_dir = Path(Config._HOME_DIR) / f"{host}" / f"{proxy}" / f"{congestion}" / f"P{parallel}" / f"I{iteration}" / f"R{run}"
-            #output_dir.mkdir(parents=True, exist_ok=True)
-            #mkdir(host, output_dir)
-
-            #logging.info(f"Starting system and network stats logger on {host}")
-            if host == "chi-prod" or host == "chi-p2cs":
-                module = Config._MODULES[0]
-                #stats_prod = run_stats(iteration, run, output_dir, Config._SRC_DIR)
-                stats_prod = run_stats(host, duration + 8, run, os.path.join(output_dir, f"stats_R{run}.json"), Config._RMT_SYS_SCRIPT)
-                start_containers(host, module, parallel, run, Config._MINI_PATH, output_dir)
-                #logging.debug(f"CONTAINER: Starting the containers {module.upper()} on {host.upper()} with {parallel} parallels")
-            elif host != "chi-prod" and host != "chi-p2cs":
-                stats_cons = run_stats(host, duration + 8, run, os.path.join(output_dir, f"stats_R{run}.json"), Config._RMT_SYS_SCRIPT)
-                #logging.info(f"STATS FROM MINI: starting stats on {module.upper()} on {host.upper()}")
-                for module in Config._MODULES[1:]:
-                    time.sleep(1)
-                    start_containers(host, module, parallel, run, Config._MINI_PATH, output_dir)
-                    #logging.debug(f"CONTAINER: starting the containers {module.upper()} on {host.upper()} with {parallel} parallels")
-
-        #time.sleep(duration + 3 + 1)    #the omit time in iperf + 1 for the docker container startup time
-        time.sleep(duration + 1)
-        stop_containers(hosts)
-
-        dist_is_done = False
-        for host in hosts.values():
-            resp = wait_and_prune(host, duration + 8)
-            if host != "chi-prod" and host != "chi-p2cs" and resp:
-                dist_is_done = True
-
-        if dist_is_done:
-            for host in hosts.values():
-                logging.info(f"MINI: Data transfer is done")
-                prune_containers(host)
-        else:
-            logging.warning(f"MINI: Containers are still running after timeout on {host.upper()}\n")
-            #raise RuntimeError(f"MINI: {host.upper()} containers are still running after timeout, not pruning!")
-        
-        time.sleep(5)
-        for host in hosts.values():
-            resp = wait_and_prune(host, 5)
-            if not resp:
-                logging.warning(f"CONTAINER: CONTAINERS ON {host.upper()} ARE STILL RUNNING and not PRUNED \n")
-        
-        stdout, stderr = stats_cons.communicate()
-        logging.info("MINI: Completed System Monitor successfully \n")
-        return True
-    
-    except Exception as e:
-        logging.warning(f"MINI: Failed to run the mini apps: {e}")
-        raise Exception(f"Error running mini apps: {e}")
-
-
-def mini_apps_main():
-
-    logging.info(f"IPERF: Starting iperf main process: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  \n") 
-
-    """logging.info("MINI-APPS: Cleaning up the containers on all endpoints")
-    for host in Config._ENDPOINTS.values():
-        prune_containers(host)
-        time.sleep(2)"""
-    
-    # iterations, run, congestion, proxy, parallels (total containers), 
-    prev_congestion, prev_proxy = None, None
-    total_runs = len(Config._TIME_FRAMES) * len(Config._CONGESTIONS) * len(Config._PROXY) * len(Config._PARALLELS) * Config._RUN_NUM
-
-    prev_congestion = None
-    prev_proxy = None
-    combinations = (
-        (congestion, proxy, duration, parallel, run)
-        for congestion in Config._CONGESTIONS
-        for proxy in Config._PROXY
-        for duration in Config._TIME_FRAMES
-        for parallel in Config._PARALLELS
-        for run in range(1, Config._RUN_NUM + 1)
-    )
-
-    for total_idx, (congestion, proxy, duration, parallel, run) in enumerate(combinations, start=1):
-        
-        """if congestion != prev_congestion:
-            #logging.info("MINI-APPS: Checking the Congestion Control")
-            for host in Config._HOSTS.values():
-                if not congestion_check(host, congestion):
-                    congestion_change(host, congestion)
-                sys_reload(host)
-                time.sleep(2)
-            prev_congestion = congestion
-
-        if proxy != prev_proxy:
-            if not proxy_check(Config._S2CS_HOSTS, proxy):
-                proxy_change(Config._MERROW_GLOBUS_SCRIPT, Config._S2CS_HOSTS, proxy)
-            #time.sleep(5)
-            #print(f"\n proxy is {proxy} \n")
-            prev_proxy = proxy
-        #logging.debug(f"MAIN: Current proxy is {proxy}, and the congestion is {congestion.upper()}")"""
-
-        if congestion != prev_congestion:
-            prev_congestion = congestion = congestion_change(Config._HOSTS, Config._CONGESTIONS, congestion)
-            #sys_reload(host)
-            time.sleep(2)
-
-        if proxy != prev_proxy:
-            prev_proxy = proxy = proxy_change(Config._MERROW_GLOBUS_SCRIPT, Config._S2CS_HOSTS, Config._PROXY, proxy)
-            time.sleep(1)
-
-
-
-        logging.info(f"----- Congestion: {congestion.upper()}, Proxy: {proxy}, Duration: {duration}, Parallel: {parallel}, Run:{Config._RUN_NUM} ----- \n")
-        logging.info(f"MINI: Total: {total_idx} / {total_runs}: Run: {run} / {Config._RUN_NUM}: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} \n")
-
-        ##output_dir = Path(Config._HOME_DIR) / f"{proxy}" / f"{congestion}" / f"P{parallel}" / f"I{iteration}" / f"R{run}"
-        #output_dir = Path(Config._HOME_DIR) / f"{proxy}" / f"{congestion}" / f"P{parallel}" / f"T{duration}"
-        ##output_dir.mkdir(parents=True, exist_ok=True)
-        for name, host in Config._HOSTS.items():
-            if host in Config._ENDPOINTS.values():
-                prune_containers(host)
-            time.sleep(2)
-            output_dir = Path(Config._HOME_DIR) / f"{proxy}" / f"{congestion}" / f"P{parallel}" / f"T{duration}"
-            mkdir(host, output_dir)
-            traffic_ctl(name, host, parallel, output_dir)
-        
-        run_mini_apps(Config._ENDPOINTS, duration, parallel, run, output_dir)
-        time.sleep(5)
-
-        run_mini_apps(Config._S2CS_HOSTS, duration, parallel, run, output_dir)
-        
-        if run == Config._RUN_NUM:
-            logging.info(f"MINI: Complete run {run} / {Config._RUN_NUM} ------------------------------------ \n")
-            time.sleep(5)
-
-    logging.info("All experiments complete.")
-    time.sleep(10)
