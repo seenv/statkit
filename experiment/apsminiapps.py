@@ -18,106 +18,58 @@ from config import Config, Role
 from utils import run_subprocess, popen_subprocess
 
 
-# def _daq_service(port: int, file: str, i: int) -> str:
-#     return f"""
-#   daq-{i}:
-#     image: seenv/aps-mini-apps-daq:latest
-#     network_mode: host
-#     command: python /aps-mini-apps/build/python/streamer-daq/DAQStream.py --mode 1 --simulation_file /aps-mini-apps/data/{file} --d_iteration 100 --publisher_addr tcp://*:{port} --iteration_sleep=0 --projection_sleep=0 --synch_count 1 """
-
-# def _dist_service(init_gw_ip: str, init_gw_port: int, i: int) -> str:
-#     return f"""
-#   dist-{i}:
-#     image: seenv/aps-mini-apps-dist:latest
-#     network_mode: host
-#     command: python /aps-mini-apps/build/python/streamer-dist/ModDistStreamPubDemo.py --data_source_addr tcp://{init_gw_ip}:{init_gw_port} --cast_to_float32 --normalize --my_distributor_addr tcp://127.0.0.1:4200{i * 2} --beg_sinogram 1500 --num_sinograms 2 --num_columns 2560 """
-
-# def _sirt_service(i: int) -> str:
-#     return f"""
-#   sirt-{i}:
-#     image: seenv/aps-mini-apps-dist:latest
-#     network_mode: host
-#     command: /aps-mini-apps/build/bin/sirt_stream --write-freq 4 --dest-host 127.0.0.1 --dest-port 4200{i * 2} --window-iter 1 --window-step 1 --window-length 4 -t 2 -c 1427 --pub-addr tcp://*:5300{i * 2}"""
-
-# docker run --rm \
-#   --network host \
-#   --name daq-0 \
-#   seenv/aps-mini-apps-daq:latest \
-#   python /aps-mini-apps/build/python/streamer-daq/DAQStream.py \
-#     --mode 1 \
-#     --simulation_file /aps-mini-apps/data/tomo_00058_all_subsampled1p_s1079s1081.h5 \
-#     --d_iteration 100 \
-#     --publisher_addr tcp://*:41000 \
-#     --iteration_sleep=0 \
-#     --projection_sleep=0 \
-#     --synch_count 1
-# globus-streams-launch -p 41000 $TUNNEL_ID docker run -d --rm   --network host   --name daq-0   seenv/aps-mini-apps-daq:latest   python /aps-mini-apps/build/python/streamer-daq/DAQStream.py     --mode 1     --simulation_file /aps-mini-apps/data/tomo_00058_all_subsampled1p_s1079s1081.h5     --d_iteration 100     --publisher_addr tcp://*:41000     --iteration_sleep=1     --projection_sleep=0     --synch_count 1
-
-
-# docker run --rm \
-#   --network host \
-#   --name dist-0 \
-#   seenv/aps-mini-apps-dist:latest \
-#   python /aps-mini-apps/build/python/streamer-dist/ModDistStreamPubDemo.py \
-#     --data_source_addr tcp://192.168.20.20:40368 \
-#     --cast_to_float32 \
-#     --normalize \
-#     --my_distributor_addr tcp://127.0.0.1:42000 \
-#     --beg_sinogram 1500 \
-#     --num_sinograms 2 \
-#     --num_columns 2560
-# globus-streams-launch 49ee618b-c192-4951-a91b-2cbaa870def2 docker run --rm   --network host   --name sirt-0   seenv/aps-mini-apps-dist:latest   /aps-mini-apps/build/bin/sirt_stream     --write-freq 4     --dest-host 127.0.0.1     --dest-port 42000     --window-iter 1     --window-step 1     --window-length 4     -t 2     -c 1427     --pub-addr tcp://*:53000
-
-# docker run --rm \
-#   --network host \
-#   --name sirt-0 \
-#   seenv/aps-mini-apps-dist:latest \
-#   /aps-mini-apps/build/bin/sirt_stream \
-#     --write-freq 4 \
-#     --dest-host 127.0.0.1 \
-#     --dest-port 42000 \
-#     --window-iter 1 \
-#     --window-step 1 \
-#     --window-length 4 \
-#     -t 2 \
-#     -c 1427 \
-#     --pub-addr tcp://*:53000
-# globus-streams-launch 49ee618b-c192-4951-a91b-2cbaa870def2 docker run --rm   --network host   --name sirt-0   seenv/aps-mini-apps-dist:latest   /aps-mini-apps/build/bin/sirt_stream     --write-freq 4     --dest-host 127.0.0.1     --dest-port 42000     --window-iter 1     --window-step 1     --window-length 4     -t 2     -c 1427     --pub-addr tcp://*:53000
-
-
-
 def _daq_service(port: int, file: str, i: int) -> str:
     return (
         f"docker run --rm --network host "
-        f"--name daq-{i}   seenv/aps-mini-apps-daq:latest "   
-        f"python /aps-mini-apps/build/python/streamer-daq/DAQStream.py --mode 1 "
-        f"--simulation_file /aps-mini-apps/data/{shlex.quote(file)} "    
-        f"--d_iteration 10000 --publisher_addr tcp://*:{port} "
-        f"--iteration_sleep=1 --projection_sleep=0 --synch_count 1; "
-        f"&& docker logs -f daq-{i} 2>&1; "
+        f"--name daq-{i} "
+        f"seenv/aps-mini-apps-daq:latest "
+        f"python /aps-mini-apps/build/python/streamer-daq/DAQStream.py "
+        f"--mode 1 "
+        f"--simulation_file /aps-mini-apps/data/{shlex.quote(file)} "
+        f"--d_iteration 10000 "
+        f"--publisher_addr tcp://*:{port} "
+        f"--iteration_sleep=1 "
+        f"--projection_sleep=0 "
+        f"--synch_count 1; "
+    )
+    
+def _dist_service(
+    init_gw_ip: str,
+    init_gw_port: int,
+    i: int,
+) -> str:
+    return (
+        f"docker run --rm --network host "
+        f"--name dist-{i} "
+        f"seenv/aps-mini-apps-dist:latest "
+        f"python /aps-mini-apps/build/python/streamer-dist/"
+        f"ModDistStreamPubDemo.py "
+        f"--data_source_addr tcp://{init_gw_ip}:{init_gw_port} "
+        f"--cast_to_float32 "
+        f"--normalize "
+        f"--my_distributor_addr tcp://127.0.0.1:4200{i} "
+        f"--beg_sinogram 1500 "
+        f"--num_sinograms 2 "
+        f"--num_columns 2560; "
     )
 
-def _dist_service(init_gw_ip: str, init_gw_port: int, i: int) -> str:
-    return(
-        f"docker run --rm --network host "
-        f"--name dist-{i}   seenv/aps-mini-apps-dist:latest "
-        f"python /aps-mini-apps/build/python/streamer-dist/ModDistStreamPubDemo.py "
-        f"--data_source_addr tcp://{init_gw_ip}:{init_gw_port} "
-        f"--cast_to_float32 --normalize --my_distributor_addr tcp://127.0.0.1:4200{i} "
-        f"--beg_sinogram 1500 --num_sinograms 2 --num_columns 2560; "
-        f"&& docker logs -f dist-{i} 2>&1; "
-    )
 
 def _sirt_service(i: int) -> str:
-    return(
-        f"docker run --rm --network host "   
-        f"--name sirt-{i}   seenv/aps-mini-apps-sirt:latest "
-        f"/aps-mini-apps/build/bin/sirt_stream  --write-freq 4  --dest-host 127.0.0.1 "
-        f"--dest-port 4200{i} --window-iter 1 --window-step 1 --window-length 4 "
-        f"-t 2  -c 1427  --pub-addr tcp://*:5300{i} ; "
-        f"&& docker logs -f sirt-{i} 2>&1; "
+    return (
+        f"docker run --rm --network host "
+        f"--name sirt-{i} "
+        f"seenv/aps-mini-apps-sirt:latest "
+        f"/aps-mini-apps/build/bin/sirt_stream "
+        f"--write-freq 4 "
+        f"--dest-host 127.0.0.1 "
+        f"--dest-port 4200{i} "
+        f"--window-iter 1 "
+        f"--window-step 1 "
+        f"--window-length 4 "
+        f"-t 2 "
+        f"-c 1427 "
+        f"--pub-addr tcp://*:5300{i}; "
     )
-
 def _get_container_stats(
     cfg: Config, 
     host: str,
@@ -147,7 +99,7 @@ def _are_containers_running(cfg, host, parallel, service, timeout, retries):
         elif status != total_containers and retry == retries:
             raise RuntimeError(f"MINI: Containers didn't start after {retries * cfg.sleep} seconds on {host.capitalize()}")
         elif status == total_containers and retry < retries:
-            logging.debug("MINI: Started DAQ on the %s", host.upper())
+            logging.debug("MINI: Started %d DAQ container on the %s", status, host.upper())
             break
 
 
@@ -168,6 +120,7 @@ def _start_mini_service(
     module_path: str = "/tmp/temp_files",
     check: bool = True,
 ) -> None:
+    launch_processes = []
     for i, (tunnel_port, tunnel_id) in enumerate(zip(tunnel_ports, tunnel_ids)):
         wrapper_cmd = f"globus-streams-launch -p {start_port + i} " if service == "daq" else "globus-streams-launch "
         if service == "daq":
@@ -179,32 +132,44 @@ def _start_mini_service(
 
         cp = popen_subprocess(
             host, None,
-            #f"cd {shlex.quote(out_dir)} && " 
             f"set +x; mkdir -p {shlex.quote(out_dir)} && "
-            f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
+            f"{{ "
+            f'echo "START $(date \'+%Y-%m-%d %H:%M:%S\')"; '
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{service}-time.log "
-            f"{wrapper_cmd} {tunnel_id} "
-            # f"--rm --network host --name {service}-{i}   seenv/aps-mini-apps-{service}:latest "   
-            # f"python /aps-mini-apps/build/python/streamer-daq/DAQStream.py --mode 1 "
-            # f"--simulation_file /aps-mini-apps/data/{file} "    
-            # f"--d_iteration 10000 --publisher_addr tcp://*:{port} "
-            # f"--iteration_sleep=1 --projection_sleep=0 --synch_count 1 "
-            # f"&& docker logs -f {service}-{i} 2>&1 "
-            #f"| awk '{{ print strftime(\"[%Y-%m-%d %H:%M:%S]\"), $0; fflush() }}' "
-            f"{cmd} "
-            f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
-            f"}} 2>&1 | tr '\\r' '\\n' "
-            f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
-            f"| tee {shlex.quote(out_dir)}/{shlex.quote(app)}-{service}.log & ",
-            #f"> {shlex.quote(out_dir)}/{shlex.quote(app)}-{shlex.quote(service)}.log & ",
+            f"{wrapper_cmd} {tunnel_id} {cmd} "
+            f"rc=$?; "
+            f'echo "END $(date \'+%Y-%m-%d %H:%M:%S\') rc=$rc"; '
+            f"exit $rc; "
+            f"}} 2>&1 "
+            f"| tr '\\r' '\\n' "
+            f"| stdbuf -oL awk "
+            f"'NF {{ print $0; fflush(); }}' "
+            f"| tee {shlex.quote(out_dir)}/{shlex.quote(app)}-{service}-{i}.log "
+            f"> /dev/null & ",
             localhost=cfg.localhost,
         )
+        launch_processes.append((i, cp))
 
-    if check and cp.returncode != 0:
-        raise RuntimeError(
-            f"MINI: Failed starting containers on {host.upper()}\n"
-            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-        )
+    # for i, cp in launch_processes:
+    #     try:
+    #         stdout, stderr = cp.communicate(timeout=timeout)
+    #     except subprocess.TimeoutExpired:
+    #         cp.kill()
+    #         stdout, stderr = cp.communicate()
+    #         raise RuntimeError(
+    #             f"MINI: Timed out submitting {service}-{i} "
+    #             f"on {host.upper()}\n"
+    #             f"STDOUT:\n{stdout or ''}\n"
+    #             f"STDERR:\n{stderr or ''}"
+    #         )
+    #     if check and cp.returncode != 0:
+    #         raise RuntimeError(
+    #             f"MINI: Failed submitting {service}-{i} "
+    #             f"on {host.upper()}\n"
+    #             f"Return code: {cp.returncode}\n"
+    #             f"STDOUT:\n{stdout or ''}\n"
+    #             f"STDERR:\n{stderr or ''}"
+    #         )
     logging.info("MINI: Started %s containers on %s", service.capitalize(), host.upper())
 
 
@@ -284,7 +249,6 @@ def wait_finish_transfer(
                 f"MINI: Containers didn't finish the transfer after {retries * cfg.sleep} seconds. "
                 f"listener={listener_status}, initiator={initiator_status}"
             )
-
 
 def stop_mini_containers(
     cfg: Config, parallel: int,
