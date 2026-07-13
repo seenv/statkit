@@ -189,6 +189,17 @@ def parse_args() -> argparse.Namespace:
 
 
     parser.add_argument("--initiator-ap-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the initiator access point")
+    parser.add_argument( "--listener-ap-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the listener access point")
+    parser.add_argument("--initiator-ep-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the initiator endpoint")
+    parser.add_argument("--listener-ep-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the listener endpoint" )
+
+    # parser.add_argument("--listener-ip", default="192.168.110.10")
+    # parser.add_argument("--listener-pub", default="10.191.130.100")
+    # parser.add_argument("--initiator-ip", default="192.168.120.10")
+    # parser.add_argument("--initiator-pub", default="10.191.129.43")
+    parser.add_argument("--listener-ip", default=None)
+    parser.add_argument("--listener-pub", default=None)
+    parser.add_argument("--initiator-ip", default=None)
     parser.add_argument("--initiator-pub", default=None)
 
     parser.add_argument("--tunnel-port", type=int, default=49996)
