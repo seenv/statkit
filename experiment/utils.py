@@ -84,6 +84,43 @@ def send_ntfy(success: bool, cfg: Config, error: Exception | None = None) -> Non
 
 
 #-------------------------------------------------------------------------------
+def build_net_modes(splices: Sequence[int], include_encrypt: bool) -> list[tuple[int, int]]:
+    """
+    Return valid network modes as (splice, encrypt).
+    Valid modes:
+      (0, 0): no splice, no encryption
+      (1, 0): splice enabled, encryption disabled
+      (0, 1): encryption enabled, splice disabled
+    Encryption is intentionally not combined with splice.
+    """
+    modes: list[tuple[int, int]] = []
+    for splice in splices:
+        if splice not in (0, 1):
+            raise ValueError(f"Invalid splice value: {splice}. Expected 0 or 1.")
+        mode = (splice, 0)
+        if mode not in modes:
+            modes.append(mode)
+    if include_encrypt:
+        mode = (0, 1)
+        if mode not in modes:
+            modes.append(mode)
+    if not modes:
+        raise ValueError("No network modes selected.")
+    return modes
+
+
+def net_mode_dir(splice: int, encrypt: int) -> str:
+    if splice == 0 and encrypt == 0:
+        return "A0"
+    #if splice == 1 and encrypt == 0:
+    if splice == 1:
+        return "A1"
+    #if splice == 0 and encrypt == 1:
+    if encrypt == 1:
+        return "E1"
+    raise ValueError(f"Invalid mode: splice={splice}, encrypt={encrypt}")
+
+
 def parse_size_to_bytes(size: str) -> int:
     # s = str(size).strip().upper()
     # units = {
