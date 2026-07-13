@@ -150,6 +150,18 @@ def make_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/tem
     logging.info("FILE: Source file on %s: %s", host.upper(), cp.stdout.strip())
 
 
+def cleanup_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/temp_files") -> None:
+    hosts = cfg.hosts.ep.values()
+    for host in hosts:
+        cp = run_subprocess(
+            host, None,
+            f"rm -f {shlex.quote(file_path)}/{shlex.quote(temp_file)} || true && "
+            f"du -h {shlex.quote(file_path)}/ || true ",
+            localhost=cfg.localhost,
+        )
+        logging.info("FILE: Cleaning up the temp files on %s: %s", host.upper(), cp.stdout.strip())
+
+
 def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
     dest_dir = str(PurePosixPath(dest_path).parent)
     run_subprocess(
