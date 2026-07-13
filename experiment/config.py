@@ -187,7 +187,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initiator-ep", default="chi-trans-consep")
     parser.add_argument("--listener-ep", default="chi-trans-prodep")
 
-
     parser.add_argument("--initiator-ap-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the initiator access point")
     parser.add_argument( "--listener-ap-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the listener access point")
     parser.add_argument("--initiator-ep-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the initiator endpoint")
@@ -212,6 +211,7 @@ def parse_args() -> argparse.Namespace:
     # parser.add_argument("--tomo-file", type=str, default="tomo_00058.h5")
     
     parser.add_argument("--sleep", type=int, default=5)
+
     parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,rsync,rbase,gtr,mini,mbase")
     parser.add_argument("--encrypt", action="store_true", help="Encryption is tested with splice disabled")
     parser.add_argument("--splice", type=_parse_int_list, default=[0])
@@ -281,6 +281,14 @@ def build_config(args: argparse.Namespace) -> Config:
         tunnel_port=args.tunnel_port,
         encrypt_port=args.encrypt_port,
         direct_port=args.direct_port,
+        rsync_port=args.rsync_port,                                                                                                                                                                                                                                                                                                             
+        mini_port=args.mini_port,                                                                                                                                                                                                                                                                                                               
+        mbase_port=args.mbase_port,                                                                                                                                                                                                                                                                                                             
+        tomo_file=args.tomo_file,                                                                                                                                                                                                                                                                                                               
+                                                                                                                                                                                                                                                                                                                                                
+        sleep=args.sleep,                                                                                                                                                                                                                                                                                                                       
+                                                                                                                                                                                                                                                                                                                                                
+        app=args.app,  
         encrypt=bool(args.encrypt),
         splice=args.splice,
         #splice=bool(args.splice),
@@ -292,6 +300,7 @@ def build_config(args: argparse.Namespace) -> Config:
 
         local_env="$HOME/Projects/globus_stream/streams-cli/bin/activate",
         #local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()),
+        remote_env="$HOME/streams-cli/bin/activate"
         #remote_env=f"/home/{args.remote_user}/streams-cli/bin/activate",
         report_dir=args.output,
     )
