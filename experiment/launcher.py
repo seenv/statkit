@@ -11,16 +11,21 @@ from utils import make_file, start_statkit, stop_statkit
 from utils import get_stream_id, start_tunnel, status_tunnel, stop_tunnel, delete_tunnel
 from utils import init_listener_env, init_initiator_env
 from utils import restart_gridftp, gridftp_config, gridftp_report, logging_gridftp
-from utils import start_iperf_server, start_iperf_client, cleanup_iperf
-from utils import start_iperf_server_base, start_iperf_client_base
-from utils import start_rsync_daemon_gst, start_rsync_transfer_gst
-from utils import start_rsync_daemon_base, start_rsync_transfer_base
-from utils import start_rsync_ssh, stop_rsync_daemon
+# from utils import start_iperf_server, start_iperf_client, cleanup_iperf
+# from utils import start_iperf_server_base, start_iperf_client_base
+# from utils import start_rsync_daemon_gst, start_rsync_transfer_gst
+# from utils import start_rsync_daemon_base, start_rsync_transfer_base
+# from utils import start_rsync_ssh, stop_rsync_daemon
 #from utils import create_mini_yamls, start_mini_containers, wait_finish_transfer
 # from utils import stop_mini_containers, prune_containers
-from utils import get_collection_id, start_globus_transfer
-from utils import system_state_report, record_ping
-from apsminiapps import start_mini_app, wait_finish_transfer, stop_mini_containers, prune_containers
+#from utils import get_collection_id, start_globus_transfer
+from utils import record_ping
+from sysconf import system_state_report
+from apsmini import start_mini_app, wait_finish_transfer, stop_mini_containers, prune_containers
+from iperf import start_iperf_server, start_iperf_client, start_iperf_server_base, start_iperf_client_base, cleanup_iperf
+from rsync import stop_rsync_daemon, start_rsync_daemon_gst
+from rsync import start_rsync_transfer_gst, start_rsync_daemon_base, start_rsync_transfer_base, start_rsync_ssh
+from gtransfer import start_globus_transfer, get_collection_id
 
 
 def build_net_modes(splices: Sequence[int], include_encrypt: bool) -> list[tuple[int, int]]:
@@ -447,8 +452,9 @@ def experiment_main(cfg: Config) -> None:
         if not cfg.is_test:
             logging.info("SYS: Recording the system reports")
             sys_report_dir = str(Path(cfg.report_dir) / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
+            #system_state_report(cfg, sys_report_dir)
             system_state_report(cfg, sys_report_dir)
-        
+
         mode_dir = net_mode_dir(splice, encrypt)
         temp_file = f"{arg}G.bin"
         if cfg.test == "transfer":

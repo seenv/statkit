@@ -54,6 +54,38 @@ def _parse_numa_list(s: str) -> list[str]:
         )
     return numas
 
+def _build_interface_map(
+    args: argparse.Namespace,
+) -> dict[str, tuple[str, ...]]:
+    """
+    Build a hostname -> interfaces mapping.
+
+    If multiple roles use the same hostname, their interface lists are merged
+    without duplicates.
+    """
+    entries = (
+        (args.initiator_ap, args.initiator_ap_devs),
+        (args.listener_ap, args.listener_ap_devs),
+        (args.initiator_ep, args.initiator_ep_devs),
+        (args.listener_ep, args.listener_ep_devs),
+    )
+
+    result: dict[str, list[str]] = {}
+
+    for host, devices in entries:
+        host_devices = result.setdefault(host, [])
+
+        for dev in devices:
+            dev = dev.strip()
+
+            if dev and dev not in host_devices:
+                host_devices.append(dev)
+
+    return {
+        host: tuple(devices)
+        for host, devices in result.items()
+    }
+
 @dataclass(frozen=True)
 class Hosts:
     ap: Mapping[Role, str]
@@ -72,6 +104,9 @@ class Config:
 
     localhost: str
     hosts: Hosts
+    
+    interfaces: Mapping[str, Sequence[str]]
+    
     listener_ip: str
     listener_pub: str
     initiator_ip: str
@@ -118,6 +153,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--listener-ap", default="chi-trans-prodap")
     parser.add_argument("--initiator-ep", default="chi-trans-consep")
     parser.add_argument("--listener-ep", default="chi-trans-prodep")
+
+    parser.add_argument("--initiator-ap-devs", type=_parse_str_list, default=["eno12399np0"], help="Comma-separated interfaces on the initiator access point")
+    parser.add_argument( "--listener-ap-devs", type=_parse_str_list, default=["eno12399np0"], help="Comma-separated interfaces on the listener access point")
+    parser.add_argument("--initiator-ep-devs", type=_parse_str_list, default=["enp152s0np0"], help="Comma-separated interfaces on the initiator endpoint")
+    parser.add_argument("--listener-ep-devs", type=_parse_str_list, default=["enp152s0np0"], help="Comma-separated interfaces on the listener endpoint" )
 
     parser.add_argument("--listener-ip", default="192.168.110.10")
     parser.add_argument("--listener-pub", default="10.191.130.100")
@@ -173,6 +213,8 @@ def build_config(args: argparse.Namespace) -> Config:
                 "listener": args.listener_ep,
             },
         ),
+        interfaces=_build_interface_map(args),
+
         listener_ip=args.listener_ip,
         listener_pub=args.listener_pub,
         initiator_ip=args.initiator_ip,
