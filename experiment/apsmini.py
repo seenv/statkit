@@ -14,8 +14,8 @@ from datetime import datetime
 import socket
 import traceback
 
-from config import Config, Role
-from utils import run_subprocess, popen_subprocess
+from config import Config
+from remote import run_subprocess, popen_subprocess
 
 
 def _daq_service(port: int, file: str, i: int) -> str:

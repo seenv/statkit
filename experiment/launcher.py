@@ -18,46 +18,15 @@ from utils import start_rsync_daemon_base, start_rsync_transfer_base
 from utils import start_rsync_ssh, stop_rsync_daemon
 #from utils import create_mini_yamls, start_mini_containers, wait_finish_transfer
 # from utils import stop_mini_containers, prune_containers
-from utils import get_collection_id, start_globus_transfer
-from utils import system_state_report, record_ping
-from apsminiapps import start_mini_app, wait_finish_transfer, stop_mini_containers, prune_containers
-
-
-def build_net_modes(splices: Sequence[int], include_encrypt: bool) -> list[tuple[int, int]]:
-    """
-    Return valid network modes as (splice, encrypt).
-    Valid modes:
-      (0, 0): no splice, no encryption
-      (1, 0): splice enabled, encryption disabled
-      (0, 1): encryption enabled, splice disabled
-    Encryption is intentionally not combined with splice.
-    """
-    modes: list[tuple[int, int]] = []
-    for splice in splices:
-        if splice not in (0, 1):
-            raise ValueError(f"Invalid splice value: {splice}. Expected 0 or 1.")
-        mode = (splice, 0)
-        if mode not in modes:
-            modes.append(mode)
-    if include_encrypt:
-        mode = (0, 1)
-        if mode not in modes:
-            modes.append(mode)
-    if not modes:
-        raise ValueError("No network modes selected.")
-    return modes
-
-
-def net_mode_dir(splice: int, encrypt: int) -> str:
-    if splice == 0 and encrypt == 0:
-        return "A0"
-    #if splice == 1 and encrypt == 0:
-    if splice == 1:
-        return "A1"
-    #if splice == 0 and encrypt == 1:
-    if encrypt == 1:
-        return "E1"
-    raise ValueError(f"Invalid mode: splice={splice}, encrypt={encrypt}")
+#from utils import get_collection_id, start_globus_transfer
+from utils import record_ping
+from utils import build_net_modes, net_mode_dir
+from sysconf import system_state_report
+from apsmini import start_mini_app, wait_finish_transfer, stop_mini_containers, prune_containers
+from iperf import start_iperf_server, start_iperf_client, start_iperf_server_base, start_iperf_client_base, cleanup_iperf
+from rsync import stop_rsync_daemon, start_rsync_daemon_gst
+from rsync import start_rsync_transfer_gst, start_rsync_daemon_base, start_rsync_transfer_base, start_rsync_ssh
+from gtransfer import start_globus_transfer, get_collection_id
 
 
 # ------------------------------------------------------------------------------
@@ -118,10 +87,15 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
             logging.info("IGST: Stopping the statkit monitoring on the hosts")
             stop_statkit(cfg)
         stop_tunnel(cfg, tunnel_id)
-        #status_tunnel(cfg, tunnel_id, "STOPPED")
-        #delete_tunnel(cfg, tunnel_id)
-        #hosts = list(cfg.hosts.ap.values())
-        #restart_gridftp(cfg, hosts)
+        status_tunnel(cfg, tunnel_id, "STOPPED")
+        delete_tunnel(cfg, tunnel_id)
+        # hosts = list(cfg.hosts.ap.values())
+        # restart_gridftp(cfg, hosts)
+        # for tunnel in tunnel_ids:
+        #     stop_tunnel(cfg, tunnel)
+        # for tunnel in tunnel_ids:
+        #     status_tunnel(cfg, tunnel, "STOPPED")
+        #     delete_tunnel(cfg, tunnel)
 
 
 # ------------------------------------------------------------------------------
@@ -229,6 +203,11 @@ def run_rsync_gst(
         stop_tunnel(cfg, tunnel_id)
         status_tunnel(cfg, tunnel_id, "STOPPED")
         delete_tunnel(cfg, tunnel_id)
+        # for tunnel in tunnel_ids:
+        #     stop_tunnel(cfg, tunnel)
+        # for tunnel in tunnel_ids:
+        #     status_tunnel(cfg, tunnel, "STOPPED")
+        #     delete_tunnel(cfg, tunnel)
 
 
 # ------------------------------------------------------------------------------
@@ -369,12 +348,12 @@ def run_mini_gst(
         start_mini_app(cfg, parallel, numa, "mini_gst", start_port, ini_gw_ip, tunnel_ports, tunnel_ids, output_dir, tomo_file, timeout, module_path="/tmp/temp_files")
         logging.info("MGST: Starting the APS mini app containers on the endpoints")
 
-        if cfg.test == "transfer":
-            wait_finish_transfer(cfg, parallel,"mini_gst", output_dir, timeout)
-            stop_mini_containers(cfg, parallel,"mini_gst", output_dir, timeout)
-        else:
+        if cfg.test == "stream":
             time.sleep(arg)
             stop_mini_containers(cfg, parallel,"mini_gst", output_dir, timeout)
+        # else:
+        #     wait_finish_transfer(cfg, parallel,"mini_gst", output_dir, timeout)
+        #     stop_mini_containers(cfg, parallel,"mini_gst", output_dir, timeout)
 
         if not cfg.is_test:
             logging.info("MGST: Recording RTT")        # it will run on the client

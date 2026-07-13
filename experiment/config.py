@@ -54,6 +54,50 @@ def _parse_numa_list(s: str) -> list[str]:
         )
     return numas
 
+def _default_interfaces_for_lease(
+    lease: str,
+) -> dict[str, list[str]]:
+    if lease.lower() == "chameleon":
+        return {
+            "initiator_ap": ["eno1np0", "eno2np1"],
+            "listener_ap": ["eno12399np0", "enp152s0np0"],
+            "initiator_ep": ["eno1np0", "eno2np1"],
+            "listener_ep": ["eno12399np0", "enp152s0np0"],
+        }
+
+    return {
+        "initiator_ap": ["enp7s0np0", "enp8s0np1"],
+        "listener_ap": ["enp7s0np0", "enp8s0np1"],
+        "initiator_ep": ["enp8s0"],
+        "listener_ep": ["enp8s0"],
+    }
+
+def _build_interface_map(
+    args: argparse.Namespace,
+) -> dict[str, tuple[str, ...]]:
+    entries = (
+        (args.initiator_ap, args.initiator_ap_devs),
+        (args.listener_ap, args.listener_ap_devs),
+        (args.initiator_ep, args.initiator_ep_devs),
+        (args.listener_ep, args.listener_ep_devs),
+    )
+
+    result: dict[str, list[str]] = {}
+
+    for host, devices in entries:
+        host_devices = result.setdefault(host, [])
+
+        for dev in devices:
+            dev = dev.strip()
+
+            if dev and dev not in host_devices:
+                host_devices.append(dev)
+
+    return {
+        host: tuple(devices)
+        for host, devices in result.items()
+    }
+
 @dataclass(frozen=True)
 class Hosts:
     ap: Mapping[Role, str]
@@ -119,6 +163,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initiator-ep", default="chi-trans-consep")
     parser.add_argument("--listener-ep", default="chi-trans-prodep")
 
+    parser.add_argument("--initiator-ap-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the initiator access point")
+    parser.add_argument( "--listener-ap-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the listener access point")
+    parser.add_argument("--initiator-ep-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the initiator endpoint")
+    parser.add_argument("--listener-ep-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the listener endpoint" )
+
     parser.add_argument("--listener-ip", default="192.168.110.10")
     parser.add_argument("--listener-pub", default="10.191.130.100")
     parser.add_argument("--initiator-ip", default="192.168.120.10")
@@ -151,6 +200,12 @@ def parse_args() -> argparse.Namespace:
 
 def build_config(args: argparse.Namespace) -> Config:
     is_stream = args.test == "stream"
+    
+    default_devs = _default_interfaces_for_lease(args.lease)
+    args.initiator_ap_devs = (args.initiator_ap_devs if args.initiator_ap_devs is not None else default_devs["initiator_ap"])
+    args.listener_ap_devs = (args.listener_ap_devs if args.listener_ap_devs is not None else default_devs["listener_ap"])
+    args.initiator_ep_devs = (args.initiator_ep_devs if args.initiator_ep_devs is not None else default_devs["initiator_ep"])
+    args.listener_ep_devs = (args.listener_ep_devs if args.listener_ep_devs is not None else default_devs["listener_ep"])
 
     return Config(
         verbose=args.verbose,
