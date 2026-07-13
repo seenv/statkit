@@ -484,7 +484,6 @@ def experiment_main(cfg: Config) -> None:
         if not cfg.is_test:
             logging.info("SYS: Recording the system reports")
             sys_report_dir = str(Path(cfg.report_dir) / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
-            #system_state_report(cfg, sys_report_dir)
             system_state_report(cfg, sys_report_dir)
 
         mode_dir = net_mode_dir(splice, encrypt)

@@ -284,10 +284,10 @@ def build_config(args: argparse.Namespace) -> Config:
         rsync_port=args.rsync_port,
         mini_port=args.mini_port,
         mbase_port=args.mbase_port,
-        tomo_file=args.tomo_file,                                                                                                                                                                                                                                                                                                               
-
-        sleep=args.sleep,                                                                                                                                                                                                                                                                                                                       
-
+        tomo_file=args.tomo_file,
+        
+        sleep=args.sleep,
+        
         app=args.app,
         encrypt=bool(args.encrypt),
         splice=args.splice,
