@@ -150,6 +150,18 @@ def make_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/tem
     logging.info("FILE: Source file on %s: %s", host.upper(), cp.stdout.strip())
 
 
+def cleanup_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/temp_files") -> None:
+    hosts = cfg.hosts.ep.values()
+    for host in hosts:
+        cp = run_subprocess(
+            host, None,
+            f"rm -f {shlex.quote(file_path)}/{shlex.quote(temp_file)} || true && "
+            f"du -h {shlex.quote(file_path)}/ || true ",
+            localhost=cfg.localhost,
+        )
+        logging.info("FILE: Cleaning up the temp files on %s: %s", host.upper(), cp.stdout.strip())
+
+
 def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
     dest_dir = str(PurePosixPath(dest_path).parent)
     run_subprocess(
@@ -216,17 +228,17 @@ def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, che
     splice_buffer_size = blk * (1024 ** 2)
     for host in cfg.hosts.ap.values():
         if encr == 1:
-            splice_line = "$AWAI_SPLICE_ROUTING 0"
+            splice_line = "#$AWAI_SPLICE_ROUTING 0"
             encrypt_line = "$AWAI_WAN_ENCRYPTION 1"
-            buffer_line = f"$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
         elif awai == 1:
             splice_line = "$AWAI_SPLICE_ROUTING 1"
-            encrypt_line = "$AWAI_WAN_ENCRYPTION 0"
-            buffer_line = f"$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+            encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
+            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
         else:
-            splice_line = "$AWAI_SPLICE_ROUTING 0"
-            encrypt_line = "$AWAI_WAN_ENCRYPTION 0"
-            buffer_line = f"$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+            splice_line = "#$AWAI_SPLICE_ROUTING 0"
+            encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
+            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
         extra = (
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|{splice_line}|' "
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|{encrypt_line}|' "

@@ -6,7 +6,7 @@ import time
 from typing import Sequence
 
 from config import Config
-from utils import run_subprocess, popen_subprocess
+from remote import run_subprocess, popen_subprocess
 
 
 def _daq_service(port: int, file: str, i: int) -> str:
@@ -25,8 +25,10 @@ def _daq_service(port: int, file: str, i: int) -> str:
     )
     
 def _dist_service(
-    init_gw_ip: str,
-    init_gw_port: int,
+    # init_gw_ip: str,
+    # init_gw_port: int,
+    ip: str,
+    port: int,
     i: int,
 ) -> str:
     return (
@@ -35,7 +37,8 @@ def _dist_service(
         f"seenv/aps-mini-apps-dist:latest "
         f"python /aps-mini-apps/build/python/streamer-dist/"
         f"ModDistStreamPubDemo.py "
-        f"--data_source_addr tcp://{init_gw_ip}:{init_gw_port} "
+        f"--data_source_addr tcp://{ip}:{port} "
+        #f"--data_source_addr tcp://{shlex(ip)}:{port} "
         f"--cast_to_float32 "
         f"--normalize "
         f"--my_distributor_addr tcp://127.0.0.1:4200{i} "
@@ -88,9 +91,9 @@ def _are_containers_running(cfg, host, parallel, service, timeout, retries):
         if status != total_containers and retry < retries:
             time.sleep(cfg.sleep)
         elif status != total_containers and retry == retries:
-            raise RuntimeError(f"MINI: Containers didn't start after {retries * cfg.sleep} seconds on {host.capitalize()}")
+            raise RuntimeError(f"MINI: {service.upper()} containers didn't start after {retries * cfg.sleep} seconds on {host.capitalize()}")
         elif status == total_containers and retry < retries:
-            logging.debug("MINI: Started %d DAQ container on the %s", status, host.upper())
+            logging.debug("MINI: Started %dx %s container on the %s", status, service.upper(), host.upper())
             break
 
 
@@ -102,9 +105,12 @@ def _start_mini_service(
     app: str, 
     service: str, 
     start_port: int,
-    tunnel_ids: Sequence[str],
-    tunnel_ports: Sequence[int],
-    initiator_gw_ip: str,
+    #tunnel_ids: Sequence[str],
+    #tunnel_ports: Sequence[int],
+    #initiator_gw_ip: str,
+    stream_ids: Sequence[str],
+    listen_ports: Sequence[int],
+    listener_ip: str,
     timeout: int,
     file: str,
     out_dir: str,
@@ -112,22 +118,34 @@ def _start_mini_service(
     check: bool = True,
 ) -> None:
     launch_processes = []
-    for i, (tunnel_port, tunnel_id) in enumerate(zip(tunnel_ports, tunnel_ids)):
-        wrapper_cmd = f"globus-streams-launch -p {start_port + i} " if service == "daq" else "globus-streams-launch "
+    #for i, (tunnel_port, tunnel_id) in enumerate(zip(tunnel_ports, tunnel_ids)):
+    for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
+        # wrapper_cmd = f"globus-streams-launch -p {start_port + i} {stream_id}  " if service == "daq" else f"globus-streams-launch {stream_id} "STD
+        if app == "mini_base":
+            wrapper_cmd = ""
+        else:
+            wrapper_cmd = f"globus-streams-launch -p {start_port + i} {stream_id}  " if service == "daq" else f"globus-streams-launch {stream_id} "
+
         if service == "daq":
+            # cmd = _daq_service(start_port + i, file, i)
             cmd = _daq_service(start_port + i, file, i)
         elif service == "dist":
-            cmd = _dist_service(initiator_gw_ip, tunnel_port, i)
+            # cmd = _dist_service(initiator_gw_ip, tunnel_port, i)
+            cmd = _dist_service(listener_ip, listen_port, i)
         elif service == "sirt":
             cmd = _sirt_service(i)
+
+        logging.debug(f"DEBUG ")
+        logging.debug(f"DEBUG: Command to run the containers: {wrapper_cmd} {cmd} ")
+        logging.debug(f"DEBUG ")
 
         cp = popen_subprocess(
             host, None,
             f"set +x; mkdir -p {shlex.quote(out_dir)} && "
             f"{{ "
             f'echo "START $(date \'+%Y-%m-%d %H:%M:%S\')"; '
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{service}-time.log "
-            f"{wrapper_cmd} {tunnel_id} {cmd} "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{service}-{i}-time.log "
+            f"{wrapper_cmd} {cmd} "
             f"rc=$?; "
             f'echo "END $(date \'+%Y-%m-%d %H:%M:%S\') rc=$rc"; '
             f"exit $rc; "
@@ -161,7 +179,7 @@ def _start_mini_service(
     #             f"STDOUT:\n{stdout or ''}\n"
     #             f"STDERR:\n{stderr or ''}"
     #         )
-    logging.info("MINI: Started %s containers on %s", service.capitalize(), host.upper())
+    logging.info("MINI: Started %s containers on %s", service.upper(), host.upper())
 
 
 def start_mini_app(
@@ -171,9 +189,12 @@ def start_mini_app(
     app: str, 
     #service: str,
     start_port: int,
-    initiator_gw_ip: str,
-    tunnel_ports: Sequence[int],
-    tunnel_ids: Sequence[str],
+    #initiator_gw_ip: str,
+    #tunnel_ports: Sequence[int],
+    #tunnel_ids: Sequence[str],
+    listen_ip: str,
+    listen_ports: Sequence[int],
+    stream_ids: Sequence[str],
     out_dir: str, 
     file: str,
     timeout: int, 
@@ -182,18 +203,19 @@ def start_mini_app(
     check: bool = True,
 ) -> None:
 
-    if not (len(tunnel_ports) == parallel and len(tunnel_ids) == parallel):
-        raise RuntimeError(
-            f"Expected all mini lists to have length parallel={parallel}, got "
-            f"ports={len(tunnel_ports)}, sync_tunnel_ids={len(tunnel_ids)}"
-        )
+    # if not (len(tunnel_ports) == parallel and len(tunnel_ids) == parallel)):
+    #     raise RuntimeError(f"Expected all mini lists to have length parallel={parallel}, got ports={len(tunnel_ports)}, sync_tunnel_ids={len(tunnel_ids)}")
+    if not (len(listen_ports) == parallel and len(stream_ids) == parallel):
+        raise RuntimeError(f"Expected all mini lists to have length parallel={parallel}, got ports={len(listen_ports)}, sync_tunnel_ids={len(stream_ids)}")
+    
     logging.info("MINI: Starting APS mini app containers on the endpoints")
 
     host, service = cfg.hosts.ep["listener"], "daq"
     logging.debug("MINI: Starting APS mini app's %s service %s", service.capitalize(), host.upper())
     _start_mini_service(
         cfg, host, parallel, numa, app, "daq", start_port,
-        tunnel_ids, tunnel_ports, initiator_gw_ip, timeout, file, out_dir,
+        #tunnel_ids, tunnel_ports, initiator_gw_ip, timeout, file, out_dir,
+        stream_ids, listen_ports, listen_ip, timeout, file, out_dir,
     )
     _are_containers_running(cfg, host, parallel, service, timeout, retries)
         
@@ -201,7 +223,8 @@ def start_mini_app(
     logging.debug("MINI: Starting APS mini app's %s service %s", service.capitalize(), host.upper())
     _start_mini_service(
         cfg, host, parallel, numa, app, "dist", start_port,
-        tunnel_ids, tunnel_ports, initiator_gw_ip, timeout, file, out_dir,
+        #tunnel_ids, tunnel_ports, initiator_gw_ip, timeout, file, out_dir,
+        stream_ids, listen_ports, listen_ip, timeout, file, out_dir,
     )
     _are_containers_running(cfg, host, parallel, service, timeout, retries)
     time.sleep(cfg.sleep)
@@ -210,7 +233,8 @@ def start_mini_app(
     logging.debug("MINI: Starting APS mini app's %s service %s", service.capitalize(), host.upper())
     _start_mini_service(
         cfg, host, parallel, numa, app, "sirt", start_port,
-        tunnel_ids, tunnel_ports, initiator_gw_ip, timeout, file, out_dir,
+        #tunnel_ids, tunnel_ports, initiator_gw_ip, timeout, file, out_dir,
+        stream_ids, listen_ports, listen_ip, timeout, file, out_dir,
     )
     _are_containers_running(cfg, host, parallel, service, timeout, retries)
 

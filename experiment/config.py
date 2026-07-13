@@ -54,15 +54,48 @@ def _parse_numa_list(s: str) -> list[str]:
         )
     return numas
 
+def _default_ips_for_lease(lease: str) -> dict[str, str]:
+    if lease.lower() == "chameleon":
+        return {
+            "listener_ip": "192.168.110.10",
+            "listener_pub": "10.191.130.100",
+            "initiator_ip": "192.168.120.10",
+            "initiator_pub": "10.191.129.43",
+        }
+
+    return {
+        "listener_ip": "192.168.10.10",
+        "listener_pub": "192.168.10.10",
+        "initiator_ip": "192.168.20.10",
+        "initiator_pub": "192.168.20.10",
+    }
+
+# from typing import TypeVar
+# T = TypeVar("T")
+# def _use_default(value: T | None, default: T) -> T:
+#     return default if value is None else value
+
+def _default_interfaces_for_lease(
+    lease: str,
+) -> dict[str, list[str]]:
+    if lease.lower() == "chameleon":
+        return {
+            "initiator_ap": ["eno1np0", "eno2np1"],
+            "listener_ap": ["eno12399np0", "enp152s0np0"],
+            "initiator_ep": ["eno1np0", "eno2np1"],
+            "listener_ep": ["eno12399np0", "enp152s0np0"],
+        }
+
+    return {
+        "initiator_ap": ["enp7s0np0", "enp8s0np1"],
+        "listener_ap": ["enp7s0np0", "enp8s0np1"],
+        "initiator_ep": ["enp8s0"],
+        "listener_ep": ["enp8s0"],
+    }
+
 def _build_interface_map(
     args: argparse.Namespace,
 ) -> dict[str, tuple[str, ...]]:
-    """
-    Build a hostname -> interfaces mapping.
-
-    If multiple roles use the same hostname, their interface lists are merged
-    without duplicates.
-    """
     entries = (
         (args.initiator_ap, args.initiator_ap_devs),
         (args.listener_ap, args.listener_ap_devs),
@@ -154,15 +187,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initiator-ep", default="chi-trans-consep")
     parser.add_argument("--listener-ep", default="chi-trans-prodep")
 
-    parser.add_argument("--initiator-ap-devs", type=_parse_str_list, default=["eno12399np0"], help="Comma-separated interfaces on the initiator access point")
-    parser.add_argument( "--listener-ap-devs", type=_parse_str_list, default=["eno12399np0"], help="Comma-separated interfaces on the listener access point")
-    parser.add_argument("--initiator-ep-devs", type=_parse_str_list, default=["enp152s0np0"], help="Comma-separated interfaces on the initiator endpoint")
-    parser.add_argument("--listener-ep-devs", type=_parse_str_list, default=["enp152s0np0"], help="Comma-separated interfaces on the listener endpoint" )
 
-    parser.add_argument("--listener-ip", default="192.168.110.10")
-    parser.add_argument("--listener-pub", default="10.191.130.100")
-    parser.add_argument("--initiator-ip", default="192.168.120.10")
-    parser.add_argument("--initiator-pub", default="10.191.129.43")
+    parser.add_argument("--initiator-ap-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the initiator access point")
+    parser.add_argument("--initiator-pub", default=None)
 
     parser.add_argument("--tunnel-port", type=int, default=49996)
     parser.add_argument("--encrypt-port", type=int, default=49995)
@@ -174,7 +201,6 @@ def parse_args() -> argparse.Namespace:
     # parser.add_argument("--tomo-file", type=str, default="tomo_00058.h5")
     
     parser.add_argument("--sleep", type=int, default=5)
-
     parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,rsync,rbase,gtr,mini,mbase")
     parser.add_argument("--encrypt", action="store_true", help="Encryption is tested with splice disabled")
     parser.add_argument("--splice", type=_parse_int_list, default=[0])
@@ -191,6 +217,22 @@ def parse_args() -> argparse.Namespace:
 
 def build_config(args: argparse.Namespace) -> Config:
     is_stream = args.test == "stream"
+    
+    default_devs = _default_interfaces_for_lease(args.lease)
+    default_ips = _default_ips_for_lease(args.lease)
+    
+    args.initiator_ap_devs = (args.initiator_ap_devs if args.initiator_ap_devs is not None else default_devs["initiator_ap"])
+    args.listener_ap_devs = (args.listener_ap_devs if args.listener_ap_devs is not None else default_devs["listener_ap"])
+    args.initiator_ep_devs = (args.initiator_ep_devs if args.initiator_ep_devs is not None else default_devs["initiator_ep"])
+    args.listener_ep_devs = (args.listener_ep_devs if args.listener_ep_devs is not None else default_devs["listener_ep"])
+    listener_ip = (args.listener_ip if args.listener_ip is not None else default_ips["listener_ip"])
+    listener_pub = (args.listener_pub if args.listener_pub is not None else default_ips["listener_pub"])
+    initiator_ip = (args.initiator_ip if args.initiator_ip is not None else default_ips["initiator_ip"])
+    initiator_pub = (args.initiator_pub if args.initiator_pub is not None else default_ips["initiator_pub"])
+    # listener_ip = _use_default(args.listener_ip, default_ips["listener_ip"])
+    # listener_pub = _use_default(args.listener_pub, default_ips["listener_pub"])
+    # initiator_ip = _use_default(args.initiator_ip, default_ips["initiator_ip"])
+    # initiator_pub = _use_default(args.initiator_pub, default_ips["initiator_pub"])
 
     return Config(
         verbose=args.verbose,
@@ -213,24 +255,21 @@ def build_config(args: argparse.Namespace) -> Config:
                 "listener": args.listener_ep,
             },
         ),
+        
         interfaces=_build_interface_map(args),
-
-        listener_ip=args.listener_ip,
-        listener_pub=args.listener_pub,
-        initiator_ip=args.initiator_ip,
-        initiator_pub=args.initiator_pub,
+        
+        # listener_ip=args.listener_ip,
+        # listener_pub=args.listener_pub,
+        # initiator_ip=args.initiator_ip,
+        # initiator_pub=args.initiator_pub,
+        listener_ip=listener_ip,
+        listener_pub=listener_pub,
+        initiator_ip=initiator_ip,
+        initiator_pub=initiator_pub,
 
         tunnel_port=args.tunnel_port,
         encrypt_port=args.encrypt_port,
         direct_port=args.direct_port,
-        rsync_port=args.rsync_port,
-        mini_port=args.mini_port,
-        mbase_port=args.mbase_port,
-        tomo_file=args.tomo_file,
-
-        sleep=args.sleep,
-
-        app=args.app,
         encrypt=bool(args.encrypt),
         splice=args.splice,
         #splice=bool(args.splice),
@@ -242,7 +281,6 @@ def build_config(args: argparse.Namespace) -> Config:
 
         local_env="$HOME/Projects/globus_stream/streams-cli/bin/activate",
         #local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()),
-        remote_env="$HOME/streams-cli/bin/activate",
         #remote_env=f"/home/{args.remote_user}/streams-cli/bin/activate",
         report_dir=args.output,
     )

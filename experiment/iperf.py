@@ -54,8 +54,12 @@ def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int
         f"iperf3 -c globus.{shlex.quote(tunnel_id)} -p {contact_port} "                 #f"iperf3 -c globus.{shlex.quote(tunnel_id)} -B {cfg.initiator_ip} -p {contact_port} "
         f"-Z -R -P {parallel} --timestamps --forceflush "
         f"{extra_arg} "
-        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json && "
-        f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
+        # f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json && "
+        # f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json; "
+        f"rc=$?; "
+        f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json 2>/dev/null || true; "
+        f"exit $rc ",
         localhost=cfg.localhost,
         timeout=timeout,
     )
@@ -97,8 +101,12 @@ def start_iperf_client_base(
         f"iperf3 -c {listener_pub} -p {port} "                                          #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
         f"-Z -R -P {parallel} --timestamps --forceflush "
         f"{extra_arg} "
-        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json && "
-        f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
+        # f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json && "
+        # f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
+        f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json; "
+        f"rc=$?; "
+        f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json 2>/dev/null || true; "
+        f"exit $rc ",
         localhost=cfg.localhost,
         timeout= timeout,
     )

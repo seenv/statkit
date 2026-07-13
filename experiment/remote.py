@@ -7,6 +7,7 @@ import time
 from typing import Optional
 
 
+# run subprocess via ssh
 def _ssh_base(host: str) -> list[str]:
     return ["ssh", host, "bash", "-lc"]
 
@@ -14,16 +15,14 @@ def _ssh_base(host: str) -> list[str]:
 def is_ssh_failure(cp: subprocess.CompletedProcess[str]) -> bool:
     if cp.returncode != 255:
         return False
-
     stderr = cp.stderr or ""
-    needles = (
+    needles = [
         "Connection closed by remote host",
         "Connection timed out",
         "Network is unreachable",
         "stdio forwarding failed",
-    )
-    return any(needle in stderr for needle in needles)
-
+    ]
+    return any(x in stderr for x in needles)
 
 
 def _env_wrap(cmd: str, env: Optional[str], discard: bool = False) -> str:
