@@ -54,6 +54,27 @@ def _parse_numa_list(s: str) -> list[str]:
         )
     return numas
 
+def _default_ips_for_lease(lease: str) -> dict[str, str]:
+    if lease.lower() == "chameleon":
+        return {
+            "listener_ip": "192.168.110.10",
+            "listener_pub": "10.191.130.100",
+            "initiator_ip": "192.168.120.10",
+            "initiator_pub": "10.191.129.43",
+        }
+
+    return {
+        "listener_ip": "192.168.10.10",
+        "listener_pub": "192.168.10.10",
+        "initiator_ip": "192.168.20.10",
+        "initiator_pub": "192.168.20.10",
+    }
+
+# from typing import TypeVar
+# T = TypeVar("T")
+# def _use_default(value: T | None, default: T) -> T:
+#     return default if value is None else value
+
 def _default_interfaces_for_lease(
     lease: str,
 ) -> dict[str, list[str]]:
@@ -116,6 +137,9 @@ class Config:
 
     localhost: str
     hosts: Hosts
+    
+    interfaces: Mapping[str, Sequence[str]]
+    
     listener_ip: str
     listener_pub: str
     initiator_ip: str
@@ -168,10 +192,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initiator-ep-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the initiator endpoint")
     parser.add_argument("--listener-ep-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the listener endpoint" )
 
-    parser.add_argument("--listener-ip", default="192.168.110.10")
-    parser.add_argument("--listener-pub", default="10.191.130.100")
-    parser.add_argument("--initiator-ip", default="192.168.120.10")
-    parser.add_argument("--initiator-pub", default="10.191.129.43")
+    # parser.add_argument("--listener-ip", default="192.168.110.10")
+    # parser.add_argument("--listener-pub", default="10.191.130.100")
+    # parser.add_argument("--initiator-ip", default="192.168.120.10")
+    # parser.add_argument("--initiator-pub", default="10.191.129.43")
+    parser.add_argument("--listener-ip", default=None)
+    parser.add_argument("--listener-pub", default=None)
+    parser.add_argument("--initiator-ip", default=None)
+    parser.add_argument("--initiator-pub", default=None)
 
     parser.add_argument("--tunnel-port", type=int, default=49996)
     parser.add_argument("--encrypt-port", type=int, default=49995)
@@ -202,10 +230,20 @@ def build_config(args: argparse.Namespace) -> Config:
     is_stream = args.test == "stream"
     
     default_devs = _default_interfaces_for_lease(args.lease)
+    default_ips = _default_ips_for_lease(args.lease)
+    
     args.initiator_ap_devs = (args.initiator_ap_devs if args.initiator_ap_devs is not None else default_devs["initiator_ap"])
     args.listener_ap_devs = (args.listener_ap_devs if args.listener_ap_devs is not None else default_devs["listener_ap"])
     args.initiator_ep_devs = (args.initiator_ep_devs if args.initiator_ep_devs is not None else default_devs["initiator_ep"])
     args.listener_ep_devs = (args.listener_ep_devs if args.listener_ep_devs is not None else default_devs["listener_ep"])
+    listener_ip = (args.listener_ip if args.listener_ip is not None else default_ips["listener_ip"])
+    listener_pub = (args.listener_pub if args.listener_pub is not None else default_ips["listener_pub"])
+    initiator_ip = (args.initiator_ip if args.initiator_ip is not None else default_ips["initiator_ip"])
+    initiator_pub = (args.initiator_pub if args.initiator_pub is not None else default_ips["initiator_pub"])
+    # listener_ip = _use_default(args.listener_ip, default_ips["listener_ip"])
+    # listener_pub = _use_default(args.listener_pub, default_ips["listener_pub"])
+    # initiator_ip = _use_default(args.initiator_ip, default_ips["initiator_ip"])
+    # initiator_pub = _use_default(args.initiator_pub, default_ips["initiator_pub"])
 
     return Config(
         verbose=args.verbose,
@@ -228,10 +266,17 @@ def build_config(args: argparse.Namespace) -> Config:
                 "listener": args.listener_ep,
             },
         ),
-        listener_ip=args.listener_ip,
-        listener_pub=args.listener_pub,
-        initiator_ip=args.initiator_ip,
-        initiator_pub=args.initiator_pub,
+        
+        interfaces=_build_interface_map(args),
+        
+        # listener_ip=args.listener_ip,
+        # listener_pub=args.listener_pub,
+        # initiator_ip=args.initiator_ip,
+        # initiator_pub=args.initiator_pub,
+        listener_ip=listener_ip,
+        listener_pub=listener_pub,
+        initiator_ip=initiator_ip,
+        initiator_pub=initiator_pub,
 
         tunnel_port=args.tunnel_port,
         encrypt_port=args.encrypt_port,

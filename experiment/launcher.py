@@ -7,15 +7,15 @@ from typing import Sequence
 
 from config import Config
 
-from utils import make_file, start_statkit, stop_statkit
+from utils import make_file, cleanup_file, start_statkit, stop_statkit
 from utils import get_stream_id, start_tunnel, status_tunnel, stop_tunnel, delete_tunnel
 from utils import init_listener_env, init_initiator_env
 from utils import restart_gridftp, gridftp_config, gridftp_report, logging_gridftp
-from utils import start_iperf_server, start_iperf_client, cleanup_iperf
-from utils import start_iperf_server_base, start_iperf_client_base
-from utils import start_rsync_daemon_gst, start_rsync_transfer_gst
-from utils import start_rsync_daemon_base, start_rsync_transfer_base
-from utils import start_rsync_ssh, stop_rsync_daemon
+#from utils import start_iperf_server, start_iperf_client, cleanup_iperf
+# from utils import start_iperf_server_base, start_iperf_client_base
+# from utils import start_rsync_daemon_gst, start_rsync_transfer_gst
+# from utils import start_rsync_daemon_base, start_rsync_transfer_base
+# from utils import start_rsync_ssh, stop_rsync_daemon
 #from utils import create_mini_yamls, start_mini_containers, wait_finish_transfer
 # from utils import stop_mini_containers, prune_containers
 #from utils import get_collection_id, start_globus_transfer
@@ -60,7 +60,7 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         status_tunnel(cfg, tunnel_id, "ACTIVE")
         # init initiator env + discover contact port
         logging.info("IGST: Bringing up the tunnel on Initiator AP")
-        contact_port, ini_gw_ip, gw_port = init_initiator_env(cfg, tunnel_id)
+        contact_port, init_gw_ip, gw_port = init_initiator_env(cfg, tunnel_id)
         #time.sleep(cfg.sleep)
     
         # start iperf server
@@ -170,7 +170,7 @@ def run_rsync_gst(
         status_tunnel(cfg, tunnel_id, "ACTIVE")
         # init initiator env + discover contact port
         logging.info("RGST: Bringing up the tunnel on Initiator AP")
-        contact_port, ini_gw_ip, gw_port = init_initiator_env(cfg, tunnel_id)
+        contact_port, init_gw_ip, gw_port = init_initiator_env(cfg, tunnel_id)
         
         # start rsync daemon
         logging.info("RGST: Starting the rsync daemon on the host %s", listener_host.upper())
@@ -310,8 +310,10 @@ def run_mini_gst(
 ) -> None:
     print("\n")
     logging.info("----- Test %d / %d: Starting APS mini app GST Test -----", idx, total_runs)
-    tunnel_ids, tunnel_ports = [], []
-    init_gw_ip = None
+    #tunnel_ids, tunnel_ports = [], []
+    #init_gw_ip = None
+    stream_ids, listen_ports = [], []
+    listen_ip = None
     ids = get_stream_id(cfg)
     initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
     # if parallel > 3:
@@ -321,9 +323,16 @@ def run_mini_gst(
         for i in range(parallel):
             logging.info("MGST: Creating the tunnel no %d tunnels on Localhost", i)
             tunnel_label = f"{cfg.lease.replace(' ', '_')}-{cfg.test.replace(' ', '_')}-idx{idx}-tot{total_runs}-parallel{i}"
-            tunnel_ids.append(start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout))
+            #tunnel_ids.append(start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout))
+            #stream_ids.append(start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout))
+            new_tunnel_id = (start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout))
+            stream_ids.append(new_tunnel_id)
+            logging.debug("DEBUG:")
+            logging.debug("MGST: The Tunnel ID is %s and the total Tunnel IDs are %s", new_tunnel_id, stream_ids)
+            logging.debug("DEBUG:")
 
-        for tunnel in tunnel_ids:
+        #for tunnel in tunnel_ids:
+        for tunnel in stream_ids:
             logging.info("MGST: Waiting for tunnels to get activated")
             status_tunnel(cfg, tunnel, "AWAITING_LISTENER")
             
@@ -332,7 +341,8 @@ def run_mini_gst(
             start_statkit(cfg, timeout, "mini_gst", output_dir)   #size as duration which will be * 60s
             time.sleep(cfg.sleep)
 
-        for i, tunnel in enumerate(tunnel_ids):
+        #for i, tunnel in enumerate(tunnel_ids):
+        for i, tunnel in enumerate(stream_ids):
             logging.info("MGST: Bringing up the tunnels on Listener AP")
             init_listener_env(cfg, cfg.listener_ip, tunnel, start_port + i)
 
@@ -341,11 +351,17 @@ def run_mini_gst(
 
             # init initiator env + discover contact port
             logging.info("MGST: Bringing up the tunnel on Initiator AP")
-            contact_port, ini_gw_ip, gw_port = init_initiator_env(cfg, tunnel)
-            tunnel_ports.append(gw_port)
+            #contact_port, init_gw_ip, gw_port = init_initiator_env(cfg, tunnel)
+            #tunnel_ports.append(gw_port)
+            contact_port, listen_ip, gw_port = init_initiator_env(cfg, tunnel)
+            listen_ports.append(gw_port)
+            logging.debug("DEBUG:")
+            logging.debug("MGST: The Tunnel Port assigned to Tunnel ID %s is %s of total ports of %s on Gateway of IP %s", tunnel, gw_port, listen_ports, listen_ip)
+            logging.debug("DEBUG:")
 
         logging.info("MGST: Starting APS mini app containers")
-        start_mini_app(cfg, parallel, numa, "mini_gst", start_port, ini_gw_ip, tunnel_ports, tunnel_ids, output_dir, tomo_file, timeout, module_path="/tmp/temp_files")
+        #start_mini_app(cfg, parallel, numa, "mini_gst", start_port, init_gw_ip, tunnel_ports, tunnel_ids, output_dir, tomo_file, timeout, module_path="/tmp/temp_files")
+        start_mini_app(cfg, parallel, numa, "mini_gst", start_port, listen_ip, listen_ports, stream_ids, output_dir, tomo_file, timeout, module_path="/tmp/temp_files")
         logging.info("MGST: Starting the APS mini app containers on the endpoints")
 
         if cfg.test == "stream":
@@ -368,21 +384,62 @@ def run_mini_gst(
             stop_statkit(cfg)
         stop_mini_containers(cfg, parallel, "mini_gst", output_dir, timeout)
         prune_containers(cfg, parallel, "mini_gst", output_dir, timeout)
-        for tunnel in tunnel_ids:
+        # for tunnel in tunnel_ids:
+        #     stop_tunnel(cfg, tunnel)
+        # for tunnel in tunnel_ids:
+        #     status_tunnel(cfg, tunnel, "STOPPED")
+        #     delete_tunnel(cfg, tunnel)
+        for tunnel in stream_ids:
             stop_tunnel(cfg, tunnel)
-        for tunnel in tunnel_ids:
+        for tunnel in stream_ids:
             status_tunnel(cfg, tunnel, "STOPPED")
             delete_tunnel(cfg, tunnel)
             
 # ------------------------------------------------------------------------------
 # APS Mini App Base        
 def run_mini_base(
-    cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, tomo_file: str, 
+    parallel: int, arg: int, 
+    start_port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
+    #listener_host: str, initiator_host: str, numa: str, output_dir: str,
+    encrypt: int,
 ) -> None:
     print("\n")
-    logging.info("----- Test %d / %d: Starting APS Mini App Base Test -----", idx, total_runs)
-    pass
+    logging.info("----- Test %d / %d: Starting APS mini app GST Test -----", idx, total_runs)
+    stream_ids, listen_ports = [], []
+    listen_ip = cfg.listener_pub
+    try:
+        if not cfg.is_test:
+            logging.info("MBASE: Starting statkit monitoring")
+            start_statkit(cfg, timeout, "mini_base", output_dir)   #size as duration which will be * 60s
+            time.sleep(cfg.sleep)
 
+        #for i, tunnel in enumerate(tunnel_ids):
+        for i in range(parallel):
+            listen_ports.append(start_port + i)
+            stream_ids.append(start_port + i)
+
+        logging.info("MBASE: Starting APS mini app containers")
+        start_mini_app(cfg, parallel, numa, "mini_base", start_port, listen_ip, listen_ports, stream_ids, output_dir, tomo_file, timeout, module_path="/tmp/temp_files")
+        logging.info("MBASE: Starting the APS mini app containers on the endpoints")
+
+        if cfg.test == "stream":
+            time.sleep(arg)
+            stop_mini_containers(cfg, parallel,"mini_base", output_dir, timeout)
+
+        if not cfg.is_test:
+            logging.info("MBASE: Recording RTT")        # it will run on the client
+            record_ping(cfg, initiator_host, cfg.listener_pub, "mini_base", output_dir)
+
+    except Exception as e:
+        raise RuntimeError(f"MBASE: Runtime Error: {e}") from e
+
+    finally:
+        if not cfg.is_test:
+            logging.info("MBASE: Stopping statkit monitoring")
+            stop_statkit(cfg)
+        stop_mini_containers(cfg, parallel, "mini_base", output_dir, timeout)
+        prune_containers(cfg, parallel, "mini_base", output_dir, timeout)
 
 
 # ------------------------------------------------------------------------------
@@ -423,6 +480,7 @@ def experiment_main(cfg: Config) -> None:
             "--------------- Config: %d:%d / %d : NUMA %s / blocksize %s / arg %s / splice %s / encrypt %s / run %s ---------------",
             idx, idx * len(cfg.app), total_tests, numa, block, arg, splice, encrypt, run,
         )
+        idx = 0
         if not cfg.is_test:
             logging.info("SYS: Recording the system reports")
             sys_report_dir = str(Path(cfg.report_dir) / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
@@ -446,6 +504,7 @@ def experiment_main(cfg: Config) -> None:
         timeout = (arg * 120)
 
         if "iperf" in cfg.app:
+            idx += 1
             if block != last_block or splice != last_splice or encrypt != last_encrypt:
                 logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
                 gridftp_config(cfg, block, splice, encrypt, output_dir)
@@ -458,7 +517,8 @@ def experiment_main(cfg: Config) -> None:
             #time.sleep(cfg.sleep)
             
             run_iperf_gst(
-                cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
+                #cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
+                cfg, idx=idx, total_runs=total_tests, timeout=timeout,
                 parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.tunnel_port,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 numa=numa,
@@ -467,8 +527,10 @@ def experiment_main(cfg: Config) -> None:
             #time.sleep(cfg.sleep)
 
         if "ibase" in cfg.app:
+            idx += 1
             run_iperf_base(
-                cfg, idx=idx, total_runs=total_runs, timeout=timeout,
+                # cfg, idx=idx, total_runs=total_runs, timeout=timeout,
+                cfg, idx=idx, total_runs=total_tests, timeout=timeout,
                 parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.direct_port,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 numa=numa,
@@ -478,6 +540,7 @@ def experiment_main(cfg: Config) -> None:
 
 
         if "rsync" in cfg.app and cfg.test == "transfer":
+            idx += 1
             if block != last_block or splice != last_splice or encrypt != last_encrypt:
                 logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
                 gridftp_config(cfg, block, splice, encrypt, output_dir)
@@ -487,7 +550,8 @@ def experiment_main(cfg: Config) -> None:
             gridftp_report(cfg, output_dir)
             
             run_rsync_gst(
-                cfg, idx=idx, total_runs=total_runs, timeout=timeout, 
+                # cfg, idx=idx, total_runs=total_runs, timeout=timeout, 
+                cfg, idx=idx, total_runs=total_tests, timeout=timeout,
                 parallel=parallel, arg=arg, 
                 temp_file=temp_file,
                 port=cfg.rsync_port,
@@ -498,9 +562,11 @@ def experiment_main(cfg: Config) -> None:
 
 
         if "rbase" in cfg.app and cfg.test == "transfer":
+            idx += 1
             run_rsync_base(
                 # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
-                cfg, idx=idx, total_runs=total_runs, timeout=timeout, 
+                # cfg, idx=idx, total_runs=total_runs, timeout=timeout, 
+                cfg, idx=idx, total_runs=total_tests, timeout=timeout,
                 #parallel=parallel, arg=arg, 
                 temp_file=temp_file,
                 #port=cfg.rsync_port,
@@ -512,6 +578,7 @@ def experiment_main(cfg: Config) -> None:
             #time.sleep(cfg.sleep)
 
         if "gtr" in cfg.app and cfg.test == "transfer":
+            idx += 1
             logging_gridftp(cfg, output_dir)
             logging.info("GTR: Changing the Gridftp log path")
             #restart_gridftp(cfg)
@@ -519,7 +586,7 @@ def experiment_main(cfg: Config) -> None:
             
             run_globus_transfer(
                 # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
-                cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
+                cfg, idx=idx, total_runs=total_tests, timeout=timeout,temp_file=temp_file,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 numa=numa,
                 output_dir=output_dir, 
@@ -528,10 +595,12 @@ def experiment_main(cfg: Config) -> None:
             #time.sleep(cfg.sleep)
 
         if "mini" in cfg.app and cfg.test == "stream":
+            idx += 1
             run_mini_gst(
                 cfg,
                 idx=idx,
-                total_runs=total_runs,
+                #total_runs=total_runs,
+                total_runs=total_tests,
                 timeout=timeout,
                 tomo_file=cfg.tomo_file,
                 parallel=parallel,
@@ -544,7 +613,25 @@ def experiment_main(cfg: Config) -> None:
                 encrypt=encrypt,
             )
             
-        # if "mbase" in cfg.app:
-        #     run_mini_base()
+        if "mbase" in cfg.app and cfg.test == "stream":
+            idx += 1
+            run_mini_base(
+                cfg,
+                idx=idx,
+                #total_runs=total_runs,
+                total_runs=total_tests,
+                timeout=timeout,
+                tomo_file=cfg.tomo_file,
+                parallel=parallel,
+                arg=arg,
+                start_port=cfg.mini_port,
+                listener_host=cfg.hosts.ep["listener"],
+                initiator_host=cfg.hosts.ep["initiator"],
+                numa=numa,
+                output_dir=output_dir,
+                encrypt=encrypt,
+            )
 
         time.sleep(cfg.sleep)
+        if cfg.test == "transfer":
+            cleanup_file(cfg, arg, temp_file)

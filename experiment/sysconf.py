@@ -1930,11 +1930,18 @@ def _sysctl_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool 
         "net.ipv4.tcp_ecn",
         "net.ipv4.tcp_moderate_rcvbuf",
     )
+    quoted_keys = " ".join(shlex.quote(key) for key in keys)
     for host in hosts:
         cp = run_subprocess(
             host, None,
             f"mkdir -p {shlex.quote(out_dir)} && "
-            f"sysctl {' '.join(keys)} > {shlex.quote(out_dir)}/sysctl.log",
+            #f"sysctl {' '.join(keys)} > {shlex.quote(out_dir)}/sysctl.log",
+            f": > {shlex.quote(out_dir)}/sysctl.log && "
+            f"for key in {quoted_keys}; do "
+            f"sysctl \"$key\" >> {shlex.quote(out_dir)}/sysctl.log 2>&1 "
+            f"|| echo \"$key = unavailable\" "
+            f">> {shlex.quote(out_dir)}/sysctl.log; "
+            f"done ",
             localhost=cfg.localhost,
         )
         if check and cp.returncode != 0:
@@ -1957,7 +1964,7 @@ def _host_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = 
         f"echo; echo '### ip route'; ip route; "
         f"echo; echo '### df -hT'; df -hT; "
         f"echo; echo '### lsblk'; lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL; "
-        f") > {shlex.quote(f'{out_dir}/host.log')}"
+        f") > {shlex.quote(f'{out_dir}/host.log')} 2>&1 "
     )
     for host in hosts:
         cp = run_subprocess(host, None, cmd, localhost=cfg.localhost)
@@ -1967,7 +1974,7 @@ def _host_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = 
 
 def _nic_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
     for host in hosts:
-        devices = _report_devices(cfg, host)
+        devices = _report_devices(cfg, host, check=check)
         dev_list = " ".join(shlex.quote(d) for d in devices)
         cp = run_subprocess(
             host, None, 
@@ -2001,14 +2008,17 @@ def _nic_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = T
 
 def _cpu_irq_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
     for host in hosts:
-        devices = _report_devices(cfg, host)
+        devices = _report_devices(cfg, host, check=check)
         dev_list = " ".join(shlex.quote(d) for d in devices)
         cp = run_subprocess(
             host, None, 
             f"mkdir -p {shlex.quote(out_dir)} && "
             f"( "
             f"echo '### irqbalance service status'; "
-            f"echo; echo '### irqbalance status'; systemctl status irqbalance --no-pager || true; "
+            f"echo; echo '## irqbalance is-active'; systemctl is-active irqbalance || true; "
+            f"echo; echo '## irqbalance is-enabled'; systemctl is-enabled irqbalance || true; "
+            f"echo; echo '## irqbalance status'; systemctl status irqbalance --no-pager || true; "
+            f"echo; echo '## irqbalance pgrep'; pgrep -a irqbalance || true;  "
             f"echo '### CPU governor'; "
             f"for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo \"$f: $(cat $f 2>/dev/null)\"; done; "
             f"echo; echo '### CPU frequencies'; "
@@ -2037,34 +2047,83 @@ def _cpu_irq_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool
         logging.debug("CPU/IRQ: Recorded CPU and IRQ report on %s", str(host).upper())
 
 
-def _rss_rps_xps_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
+# def _rss_rps_xps_report(cfg: Config, hosts: Sequence[str], out_dir: str, check: bool = True) -> None:
+#     for host in hosts:
+#         devices = _report_devices(cfg, host, check=check)
+#         dev_list = " ".join(shlex.quote(d) for d in devices)
+#         cp = run_subprocess(
+#             host, None, 
+#             f"mkdir -p {shlex.quote(out_dir)} && "
+#             #f"for dev in $(ls /sys/class/net | grep -v '^lo$'); do "
+#             f"for dev in {dev_list}; do "
+#             f"( "
+#             f"echo '### ethtool -l channels' $dev; sudo ethtool -l $dev || true; "
+#             f"echo; echo '### ethtool -x RSS indirection' $dev; sudo ethtool -x $dev || true; "
+#             f"echo; echo '### RPS/XPS sysfs' $dev; "
+#             f"find /sys/class/net/$dev/queues -type f "
+#             f"\\( -name rps_cpus -o -name rps_flow_cnt -o -name xps_cpus \\) "
+#             f"-exec sh -c 'for f do echo \"$f: $(cat \"$f\")\"; done' sh {{}} + || true; "
+#             f"echo; echo '### NUMA node' $dev; "
+#             f"echo; echo '## NUMA hardware;' numactl --hardware || true; "
+#             f"echo; echo '## NUMA system;' cat /sys/devices/system/cpu/online || true; "
+#             f"cat /sys/class/net/$dev/device/numa_node || true; "
+#             f"echo; echo '### local CPU list' $dev; "
+#             f"cat /sys/class/net/$dev/device/local_cpulist || true; "
+#             f") > {shlex.quote(out_dir)}/rss_rps_xps_${{dev}}.log 2>&1; "
+#             f"done",
+#             localhost=cfg.localhost)
+#         if check and cp.returncode != 0:
+#             raise RuntimeError(
+#                 f"RSS/RPS/XPS: Failed on {str(host).upper()}\n"
+#                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+#             )
+#         logging.debug("RSS/RPS/XPS: Recorded reports on %s", str(host).upper())
+def _rss_rps_xps_report(
+    cfg: Config,
+    hosts: Sequence[str],
+    out_dir: str,
+    check: bool = True,
+) -> None:
     for host in hosts:
-        devices = _report_devices(cfg, host)
+        devices = _report_devices(cfg, host, check=check)
         dev_list = " ".join(shlex.quote(d) for d in devices)
+
         cp = run_subprocess(
-            host, None, 
+            host,
+            None,
             f"mkdir -p {shlex.quote(out_dir)} && "
-            #f"for dev in $(ls /sys/class/net | grep -v '^lo$'); do "
+            f"( "
+            f"echo '### NUMA hardware'; "
+            f"numactl --hardware || true; "
+            f"echo; echo '### Online CPUs'; "
+            f"cat /sys/devices/system/cpu/online || true; "
+            f") > {shlex.quote(out_dir)}/numa_cpu.log 2>&1; "
             f"for dev in {dev_list}; do "
             f"( "
-            f"echo '### ethtool -l channels' $dev; sudo ethtool -l $dev || true; "
-            f"echo; echo '### ethtool -x RSS indirection' $dev; sudo ethtool -x $dev || true; "
+            f"echo '### ethtool -l channels' $dev; "
+            f"sudo ethtool -l \"$dev\" || true; "
+            f"echo; echo '### ethtool -x RSS indirection' $dev; "
+            f"sudo ethtool -x \"$dev\" || true; "
             f"echo; echo '### RPS/XPS sysfs' $dev; "
-            f"find /sys/class/net/$dev/queues -type f "
-            f"\\( -name rps_cpus -o -name rps_flow_cnt -o -name xps_cpus \\) "
-            f"-exec sh -c 'for f do echo \"$f: $(cat \"$f\")\"; done' sh {{}} + || true; "
+            f"find \"/sys/class/net/$dev/queues\" -type f "
+            f"\\( -name rps_cpus -o -name rps_flow_cnt "
+            f"-o -name xps_cpus \\) "
+            f"-exec sh -c "
+            f"'for f do echo \"$f: $(cat \"$f\")\"; done' sh {{}} + "
+            f"|| true; "
             f"echo; echo '### NUMA node' $dev; "
-            f"cat /sys/class/net/$dev/device/numa_node || true; "
+            f"cat \"/sys/class/net/$dev/device/numa_node\" || true; "
             f"echo; echo '### local CPU list' $dev; "
-            f"cat /sys/class/net/$dev/device/local_cpulist || true; "
+            f"cat \"/sys/class/net/$dev/device/local_cpulist\" || true; "
             f") > {shlex.quote(out_dir)}/rss_rps_xps_${{dev}}.log 2>&1; "
             f"done",
-            localhost=cfg.localhost)
+            localhost=cfg.localhost,
+            check=False,
+        )
+
         if check and cp.returncode != 0:
-            raise RuntimeError(
-                f"RSS/RPS/XPS: Failed on {str(host).upper()}\n"
-                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-            )
+            raise RuntimeError(f"RSS/RPS/XPS: Failed on {str(host).upper()}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
+
         logging.debug("RSS/RPS/XPS: Recorded reports on %s", str(host).upper())
 
 
