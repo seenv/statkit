@@ -473,6 +473,10 @@ def experiment_main(cfg: Config) -> None:
     )
 
     total_tests = total_runs * len(cfg.app)
+    if not cfg.is_test:
+        logging.info("SYS: Recording the system reports")
+        sys_report_dir = str(Path(cfg.report_dir) / f"{cfg.test}" / f"{cfg.numactl}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
+        system_state_report(cfg, sys_report_dir)
 
     for idx, (numa, block, parallel, arg, splice, encrypt, run) in enumerate(test_config, start=1):
         print("\n")
@@ -480,17 +484,17 @@ def experiment_main(cfg: Config) -> None:
             "--------------- Config: %d:%d / %d : NUMA %s / blocksize %s / arg %s / splice %s / encrypt %s / run %s ---------------",
             idx, idx * len(cfg.app), total_tests, numa, block, arg, splice, encrypt, run,
         )
-        idx = 0
-        if not cfg.is_test:
-            logging.info("SYS: Recording the system reports")
-            sys_report_dir = str(Path(cfg.report_dir) / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
-            system_state_report(cfg, sys_report_dir)
+        test_idx = 0
+        # if not cfg.is_test:
+        #     logging.info("SYS: Recording the system reports")
+        #     sys_report_dir = str(Path(cfg.report_dir) / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
+        #     system_state_report(cfg, sys_report_dir)
 
         mode_dir = net_mode_dir(splice, encrypt)
         temp_file = f"{arg}G.bin"
         if cfg.test == "transfer":
             output_path = (
-                Path(cfg.report_dir) / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / f"B{block}" / f"P{parallel}" / f"S{arg}" / mode_dir / f"R{run}"
+                Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / f"B{block}" / f"P{parallel}" / f"S{arg}" / mode_dir / f"R{run}"
             )
             output_dir = str(output_path)
             #make_output(cfg, output_dir)
@@ -498,13 +502,13 @@ def experiment_main(cfg: Config) -> None:
 
         elif cfg.test == "stream":
             output_path = (
-                Path(cfg.report_dir) / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / f"B{block}" / f"P{parallel}" / f"T{arg}" / mode_dir / f"R{run}"
+                Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / f"B{block}" / f"P{parallel}" / f"T{arg}" / mode_dir / f"R{run}"
             )
             output_dir = str(output_path)
         timeout = (arg * 120)
 
         if "iperf" in cfg.app:
-            idx += 1
+            test_idx += 1
             if block != last_block or splice != last_splice or encrypt != last_encrypt:
                 logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
                 gridftp_config(cfg, block, splice, encrypt, output_dir)
@@ -518,7 +522,7 @@ def experiment_main(cfg: Config) -> None:
             
             run_iperf_gst(
                 #cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
-                cfg, idx=idx, total_runs=total_tests, timeout=timeout,
+                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
                 parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.tunnel_port,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 numa=numa,
@@ -527,10 +531,10 @@ def experiment_main(cfg: Config) -> None:
             #time.sleep(cfg.sleep)
 
         if "ibase" in cfg.app:
-            idx += 1
+            test_idx += 1
             run_iperf_base(
                 # cfg, idx=idx, total_runs=total_runs, timeout=timeout,
-                cfg, idx=idx, total_runs=total_tests, timeout=timeout,
+                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
                 parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.direct_port,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 numa=numa,
@@ -540,7 +544,7 @@ def experiment_main(cfg: Config) -> None:
 
 
         if "rsync" in cfg.app and cfg.test == "transfer":
-            idx += 1
+            test_idx += 1
             if block != last_block or splice != last_splice or encrypt != last_encrypt:
                 logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
                 gridftp_config(cfg, block, splice, encrypt, output_dir)
@@ -551,7 +555,7 @@ def experiment_main(cfg: Config) -> None:
             
             run_rsync_gst(
                 # cfg, idx=idx, total_runs=total_runs, timeout=timeout, 
-                cfg, idx=idx, total_runs=total_tests, timeout=timeout,
+                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
                 parallel=parallel, arg=arg, 
                 temp_file=temp_file,
                 port=cfg.rsync_port,
@@ -562,11 +566,11 @@ def experiment_main(cfg: Config) -> None:
 
 
         if "rbase" in cfg.app and cfg.test == "transfer":
-            idx += 1
+            test_idx += 1
             run_rsync_base(
                 # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
                 # cfg, idx=idx, total_runs=total_runs, timeout=timeout, 
-                cfg, idx=idx, total_runs=total_tests, timeout=timeout,
+                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
                 #parallel=parallel, arg=arg, 
                 temp_file=temp_file,
                 #port=cfg.rsync_port,
@@ -578,7 +582,7 @@ def experiment_main(cfg: Config) -> None:
             #time.sleep(cfg.sleep)
 
         if "gtr" in cfg.app and cfg.test == "transfer":
-            idx += 1
+            test_idx += 1
             logging_gridftp(cfg, output_dir)
             logging.info("GTR: Changing the Gridftp log path")
             #restart_gridftp(cfg)
@@ -586,7 +590,7 @@ def experiment_main(cfg: Config) -> None:
             
             run_globus_transfer(
                 # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
-                cfg, idx=idx, total_runs=total_tests, timeout=timeout,temp_file=temp_file,
+                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,temp_file=temp_file,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 numa=numa,
                 output_dir=output_dir, 
@@ -595,10 +599,10 @@ def experiment_main(cfg: Config) -> None:
             #time.sleep(cfg.sleep)
 
         if "mini" in cfg.app and cfg.test == "stream":
-            idx += 1
+            test_idx += 1
             run_mini_gst(
                 cfg,
-                idx=idx,
+                idx=test_idx,
                 #total_runs=total_runs,
                 total_runs=total_tests,
                 timeout=timeout,
@@ -614,10 +618,10 @@ def experiment_main(cfg: Config) -> None:
             )
             
         if "mbase" in cfg.app and cfg.test == "stream":
-            idx += 1
+            test_idx += 1
             run_mini_base(
                 cfg,
-                idx=idx,
+                idx=test_idx,
                 #total_runs=total_runs,
                 total_runs=total_tests,
                 timeout=timeout,

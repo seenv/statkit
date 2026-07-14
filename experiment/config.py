@@ -31,6 +31,20 @@ def _parse_str_list(s: str) -> list[str]:
     return values
 
 
+def _parse_test_list(s: str) -> list[TestMode]:
+    valid_tests = {"stream", "transfer"}
+    tests = _parse_str_list(s)
+
+    invalid = sorted(set(tests) - valid_tests)
+    if invalid:
+        raise argparse.ArgumentTypeError(
+            f"Invalid test mode(s): {', '.join(invalid)}. "
+            f"Valid choices: {', '.join(sorted(valid_tests))}"
+        )
+
+    return [cast(TestMode, test) for test in tests]
+
+
 def _parse_app_list(s: str) -> list[str]:
     valid_apps = {"iperf", "ibase", "rsync", "rbase", "gtr", "mini", "mbase"}
     apps = _parse_str_list(s)
@@ -175,7 +189,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--is-test", action="store_true")
     parser.add_argument("--lease", required=True, help="Lease name on the testbed")
-    parser.add_argument("--test", required=True, choices=["stream", "transfer"], help="Experiment/test to perform")
+    #parser.add_argument("--test", required=True, choices=["stream", "transfer"], help="Experiment/test to perform")
+    parser.add_argument("--test", type=_parse_test_list, required=True, help="Comma-separated test modes: stream,transfer")
     parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
 
     parser.add_argument("--numactl", type=_parse_numa_list, required=True, help="Experimetns with numa tunning enabled")
@@ -226,8 +241,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_config(args: argparse.Namespace) -> Config:
-    is_stream = args.test == "stream"
+#def build_config(args: argparse.Namespace) -> Config:
+def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
+
+    #is_stream = args.test == "stream"
+    # is_stream = test_mode == "stream"
     
     default_devs = _default_interfaces_for_lease(args.lease)
     default_ips = _default_ips_for_lease(args.lease)
@@ -249,7 +267,8 @@ def build_config(args: argparse.Namespace) -> Config:
         verbose=args.verbose,
         is_test=args.is_test,
         lease=args.lease,
-        test=cast(TestMode, args.test),
+        #test=cast(TestMode, args.test),
+        test=test_mode,
         
         numactl=args.numactl,
         tcp_buffer=args.tcp_buffer,
@@ -293,8 +312,10 @@ def build_config(args: argparse.Namespace) -> Config:
         splice=args.splice,
         #splice=bool(args.splice),
         parallels=args.parallel,
-        time_frames=args.time if is_stream else [],
-        file_sizes=args.size if not is_stream else [],
+        # time_frames=args.time if is_stream else [],
+        # file_sizes=args.size if not is_stream else [],
+        time_frames=args.time,
+        file_sizes=args.size,
         blocks=args.blocks,
         run_num=args.run,
 
@@ -306,6 +327,13 @@ def build_config(args: argparse.Namespace) -> Config:
     )
 
 
-def get_config() -> Config:
+# def get_config() -> Config:
+#     args = parse_args()
+#     return build_config(args)
+def get_configs() -> list[Config]:
     args = parse_args()
-    return build_config(args)
+
+    return [
+        build_config(args, test_mode)
+        for test_mode in args.test
+    ]
