@@ -216,12 +216,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initiator-ip", default=None)
     parser.add_argument("--initiator-pub", default=None)
 
-    parser.add_argument("--tunnel-port", type=int, default=49996)
-    parser.add_argument("--encrypt-port", type=int, default=49995)
-    parser.add_argument("--direct-port", type=int, default=49999)
-    parser.add_argument("--rsync-port", type=int, default=49998)
-    parser.add_argument("--mini-port", type=int, default=49950)
-    parser.add_argument("--mbase-port", type=int, default=49970)
+    parser.add_argument("--tunnel-port", type=int, default=50000)
+    parser.add_argument("--encrypt-port", type=int, default=50015)
+    parser.add_argument("--direct-port", type=int, default=50030)
+    parser.add_argument("--rsync-port", type=int, default=50045)
+    parser.add_argument("--mini-port", type=int, default=50060)
+    parser.add_argument("--mbase-port", type=int, default=50075)
     parser.add_argument("--tomo-file", type=str, default="tomo_00058_all_subsampled1p_s1079s1081.h5")
     # parser.add_argument("--tomo-file", type=str, default="tomo_00058.h5")
     

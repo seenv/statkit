@@ -147,7 +147,7 @@ def make_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/tem
         f"du -h {shlex.quote(file_path)}/{shlex.quote(temp_file)}",
         localhost=cfg.localhost,
     )
-    logging.info("FILE: Source file on %s: %s", host.upper(), cp.stdout.strip())
+    logging.debug("FILE: Source file on %s: %s", host.upper(), cp.stdout.strip())
 
 
 def cleanup_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/temp_files") -> None:
@@ -159,7 +159,7 @@ def cleanup_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/
             f"du -h {shlex.quote(file_path)}/ || true ",
             localhost=cfg.localhost,
         )
-        logging.info("FILE: Cleaning up the temp files on %s: %s", host.upper(), cp.stdout.strip())
+        logging.debug("FILE: Cleaning up the temp files on %s: %s", host.upper(), cp.stdout.strip())
 
 
 def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
@@ -169,7 +169,7 @@ def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
         f"mkdir -p {shlex.quote(dest_dir)} ", #&& ",
         localhost=cfg.localhost,
     )
-    logging.info("RSYNC: Prepared destination on %s: file=%s", host.upper(), dest_path)
+    logging.debug("RSYNC: Prepared destination on %s: file=%s", host.upper(), dest_path)
 
 
 _UUID_CANDIDATE = re.compile(r"[0-9a-fA-F-]{32,36}")
@@ -459,10 +459,10 @@ def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 100, wait
         )
         state, status = _parse_status((cp.stdout + "\n" + cp.stderr).strip())   # AWAITING_LISTENER, ACTIVE, STOPPING, STOPPED
         if state == stat:
-            logging.info("GST: Tunnel State %s | Status %s", state, status)
+            logging.debug("GST: Tunnel State %s | Status %s", state, status)
             return state, status
         if ret < retry:
-            logging.info(
+            logging.debug(
                 "GST: Waiting for tunnel to reache %s. Current state: %s. Retry: %d / %d next try in %d secs", 
                 stat, state, ret, retry, wait)
             time.sleep(wait)
@@ -479,7 +479,7 @@ def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
         localhost=cfg.localhost,
         check=False,
     )
-    logging.info("LOCAL: Stoping the stream tunnel %s", tunnel_id)
+    logging.debug("LOCAL: Stoping the stream tunnel %s", tunnel_id)
 
 
 def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
@@ -489,7 +489,7 @@ def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
         localhost=cfg.localhost,
         check=False,
     )
-    logging.info("LOCAL: Deleted the streams tunnel %s", tunnel_id)
+    logging.debug("LOCAL: Deleted the streams tunnel %s", tunnel_id)
 
 
 def get_numa_node(cfg: Config, host: str, dev: str) -> tuple[int, str]:
@@ -663,7 +663,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #         "echo $! " ,
 #         localhost=cfg.localhost,
 #     )
-#     logging.info("IPERF: Started iperf3 server on host %s", host.upper())
+#     logging.debug("IPERF: Started iperf3 server on host %s", host.upper())
 
 
 # def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, 
@@ -690,7 +690,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #     n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
 #     #tail = "\n".join(cp.stdout.splitlines()[-n:])
 #     tail = "\n".join(cp.stdout.splitlines()[-29:-21])
-#     logging.info("IPERF: iPerf3 log on %s %s", host.upper(), tail)
+#     logging.debug("IPERF: iPerf3 log on %s %s", host.upper(), tail)
 #     return cp
 
 
@@ -708,7 +708,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #         "echo $! " ,
 #         localhost=cfg.localhost,
 #     )
-#     logging.info("BASE: Started iperf3 server on %s", host.upper())
+#     logging.debug("BASE: Started iperf3 server on %s", host.upper())
 
 
 # def start_iperf_client_base(
@@ -733,7 +733,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #     n = parallel * 2 + 6        # 2x lines per each direction, 2x sums + 4 extra
 #     #tail = "\n".join(cp.stdout.splitlines()[-n:])
 #     tail = "\n".join(cp.stdout.splitlines()[-29:-21])
-#     logging.info("BASE: iPerf3 log on %s %s", host.upper(), tail)
+#     logging.debug("BASE: iPerf3 log on %s %s", host.upper(), tail)
 #     return cp
 
 
@@ -798,7 +798,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #         localhost=cfg.localhost,
 #         timeout=timeout,
 #     )
-#     logging.info("RGST: Started rsync daemon on %s:%s", src_host.upper(), port)
+#     logging.debug("RGST: Started rsync daemon on %s:%s", src_host.upper(), port)
 #     logging.debug("RGST stdout:\n%s", cp.stdout)
 
 
@@ -811,7 +811,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #     ) -> None:
 #     #rsync_url = f"rsync://{cfg.initiator_pub}:{port}/{module_name}/{file}"
 #     rsync_url = f"rsync://globus.{tunnel_id}:{port}/{module_name}/{file}"
-#     logging.info("\n\n RSYNC URL: %s\n\n", rsync_url)
+#     logging.debug("\n\n RSYNC URL: %s\n\n", rsync_url)
 #     cp = run_subprocess(
 #         dst_host, None, 
 #         f"set +x; mkdir -p {shlex.quote(out_dir)} && "
@@ -829,7 +829,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #         localhost=cfg.localhost,
 #         timeout=timeout,
 #     )
-#     logging.info(
+#     logging.debug(
 #         "RGST: Completed rsync daemon transfer from %s to %s/%s",
 #         #src_host.upper(), dst_host.upper(), port, module_name, file,
 #         rsync_url, module_path, file,
@@ -878,7 +878,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #         localhost=cfg.localhost,
 #         timeout=timeout,
 #     )
-#     logging.info("RSYNC: Started rsync daemon on %s:%s", src_host.upper(), port)
+#     logging.debug("RSYNC: Started rsync daemon on %s:%s", src_host.upper(), port)
 #     logging.debug("RSYNC stdout:\n%s", cp.stdout)
 
 
@@ -906,7 +906,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #         localhost=cfg.localhost,
 #         timeout=timeout,
 #     )
-#     logging.info(
+#     logging.debug(
 #         "RSYNC: Completed rsync daemon transfer of %s from %s to rsync://%s:%s/%s/%s",
 #         file, src_host.upper(), dst_host.upper(), port, module_name, file,
 #     )
@@ -945,7 +945,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #         localhost=cfg.localhost,
 #         timeout=timeout
 #     )
-#     logging.info("RSYNC: Completed rsync ssh transfer of %s from %s to %s/%s",
+#     logging.debug("RSYNC: Completed rsync ssh transfer of %s from %s to %s/%s",
 #         file, src_host.upper(), dst_host, file_path,
 #     )
 #     logging.debug("RSYNC stdout:\n%s", cp.stdout)
@@ -1016,7 +1016,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #         localhost=cfg.localhost,
 #         timeout=timeout,
 #     )
-#     logging.info(
+#     logging.debug(
 #         "GTR: Completed Globus transfer of %s from %s to %s", file, src_cid, dst_cid)
 #     logging.debug("GTR stdout:\n%s", cp.stdout)
 

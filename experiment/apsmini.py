@@ -135,9 +135,7 @@ def _start_mini_service(
         elif service == "sirt":
             cmd = _sirt_service(i)
 
-        logging.debug(f"DEBUG ")
         logging.debug(f"DEBUG: Command to run the containers: {wrapper_cmd} {cmd} ")
-        logging.debug(f"DEBUG ")
 
         cp = popen_subprocess(
             host, None,

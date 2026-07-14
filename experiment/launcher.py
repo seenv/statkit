@@ -31,50 +31,64 @@ from gtransfer import start_globus_transfer, get_collection_id
 
 # ------------------------------------------------------------------------------
 # iPerf3 GST
-def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
+def run_iperf_gst(
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, 
     parallel: int, arg: int, 
     temp_file: str, 
-    port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str) -> None:
+    start_port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
+    encrypt: int,
+) -> None:
     print("\n")
     logging.info("----- Tests: %d / %d ------- Strarting iPerf3 Tunnel Tests", idx, total_runs)
+    stream_ids, listen_ports = [], []
     ids = get_stream_id(cfg)
     initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
-    tunnel_label = f"{cfg.lease.replace(' ', '_')}-{cfg.test.replace(' ', '_')}-idx{idx}-tot{total_runs}"
-    logging.info("IGST: Creating the tunnel on Localhost")
-    tunnel_id = start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout)
-    #time.sleep(cfg.sleep)
     try:
-        logging.info("IGST: Waiting for tunnel to get activated")
-        status_tunnel(cfg, tunnel_id, "AWAITING_LISTENER")
+        logging.info("IGST: Creating %d tunnels on Localhost", parallel)
+        for i in range(parallel):
+            logging.debug("IGST: Creating the tunnel # %d tunnels on Localhost", parallel)
+            tunnel_label = f"{cfg.lease.replace(' ', '_')}-{cfg.test.replace(' ', '_')}-idx{idx}-tot{total_runs}-parallel{i}"
+            new_tunnel_id = (start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout))
+            stream_ids.append(new_tunnel_id)
+
+        logging.info("IGST: Activating %d tunnels", parallel)
+        for tunnel in stream_ids:
+            logging.debug("IGST: Waiting for tunnel %s to get activated", tunnel)
+            status_tunnel(cfg, tunnel, "AWAITING_LISTENER")
     
         if not cfg.is_test:
             # launch statkit
             logging.info("IGST: Starting the statkit monitoring on the hosts")
             start_statkit(cfg, timeout, "iperf_gst", output_dir)   #size as duration which will be * 60s
             time.sleep(cfg.sleep)
-    
+
         # init listener env 
-        logging.info("IGST: Bringing up the tunnel on Listener AP")
-        init_listener_env(cfg, cfg.listener_ip, tunnel_id, port)
-        # waiting till the tunnel gets activated
-        status_tunnel(cfg, tunnel_id, "ACTIVE")
-        # init initiator env + discover contact port
-        logging.info("IGST: Bringing up the tunnel on Initiator AP")
-        contact_port, init_gw_ip, gw_port = init_initiator_env(cfg, tunnel_id)
-        #time.sleep(cfg.sleep)
-    
+        logging.info("IGST: Bringing up %d tunnels on Endpoints")
+        for i, tunnel in enumerate(stream_ids):
+            logging.debug("IGST: Bringing up the tunnel %s on Listener EP", tunnel)
+            init_listener_env(cfg, cfg.listener_ip, tunnel, start_port + i)
+            
+            # waiting till the tunnel gets activated
+            status_tunnel(cfg, tunnel, "ACTIVE")
+
+            # init initiator env + discover contact port
+            logging.debug("IGST: Bringing up the tunnel %s on Initiator EP")
+            contact_port, listen_ip, gw_port = init_initiator_env(cfg, tunnel)
+            listen_ports.append(contact_port)
+            logging.debug("DEBUG: The Tunnel Fake Port assigned to Tunnel ID %s is %s of total ports of %s on Gateway of IP %s", tunnel, contact_port, listen_ports, listen_ip)
+
         # start iperf server
         logging.info("IGST: Starting iperf server")
-        start_iperf_server(cfg, listener_host, port, tunnel_id, temp_file, "iperf_gst", numa, output_dir)
+        start_iperf_server(cfg, listener_host, start_port, stream_ids, parallel, numa, output_dir, "iperf_gst", temp_file, timeout, temp_dir="/tmp/temp_files")
         time.sleep(cfg.sleep)           # it takes more for them to initiates! TODO: find a better way
 
         # run iperf client
-        logging.info("IGST: Starting iperf client")
-        start_iperf_client(cfg, initiator_host, tunnel_id, contact_port, parallel, arg, temp_file, "iperf_gst", numa, output_dir, timeout)
+        logging.info("IGST: Starting iperf client")        
+        start_iperf_client(cfg, initiator_host, stream_ids, listen_ports, parallel, numa, arg, temp_file, "iperf_gst", output_dir, timeout)        
+
         if not cfg.is_test:
             # recording rtt
             logging.info("IGST: Recording the RTT")
-            #record_ping(cfg, initiator_host, cfg.listener_ip, "iperf_gst", output_dir)
             record_ping(cfg, initiator_host, cfg.listener_pub, "iperf_gst", output_dir)
 
     except Exception as e:
@@ -86,56 +100,62 @@ def run_iperf_gst(cfg: Config, *, idx: int, total_runs: int, timeout: int,
         if not cfg.is_test:
             logging.info("IGST: Stopping the statkit monitoring on the hosts")
             stop_statkit(cfg)
-        stop_tunnel(cfg, tunnel_id)
-        status_tunnel(cfg, tunnel_id, "STOPPED")
-        delete_tunnel(cfg, tunnel_id)
-        # hosts = list(cfg.hosts.ap.values())
-        # restart_gridftp(cfg, hosts)
-        # for tunnel in tunnel_ids:
-        #     stop_tunnel(cfg, tunnel)
-        # for tunnel in tunnel_ids:
-        #     status_tunnel(cfg, tunnel, "STOPPED")
-        #     delete_tunnel(cfg, tunnel)
+        logging.info("IGST: Stopping the tunnel(s)")
+        for tunnel in stream_ids:
+            stop_tunnel(cfg, tunnel)
+        for tunnel in stream_ids:
+            status_tunnel(cfg, tunnel, "STOPPED")
+            delete_tunnel(cfg, tunnel)
 
 
 # ------------------------------------------------------------------------------
 # iPerf3 Base
-def run_iperf_base(cfg: Config, *, idx: int, total_runs: int, timeout: int, 
+def run_iperf_base(
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, 
     parallel: int, arg: int,
     temp_file: str, 
-    port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str) -> None:
+    start_port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
+    encrypt: int,
+) -> None:
+    
     print("\n")
     logging.info("----- Test %d / %d: Starting iPerf3 Direct Tests -----", idx, total_runs)
+    stream_ids, listen_ports = [], []
+    listen_ip = cfg.listener_pub
     try:
         if not cfg.is_test:
             # launch statkit
-            logging.info("BASE: Starting the statkit monitoring on the hosts")
+            logging.info("IBASE: Starting the statkit monitoring on the hosts")
             start_statkit(cfg, timeout, "iperf_base", output_dir)   #size as duration which will be * 60s
             time.sleep(cfg.sleep)
 
+        for i in range(parallel):
+            listen_ports.append(start_port + i)
+            stream_ids.append(start_port + i)
+
         # start iperf server
-        logging.info("BASE: Starting iperf server")
-        start_iperf_server_base(cfg, listener_host, port, temp_file, "iperf_base", numa, output_dir)
+        logging.info("IBASE: Starting iperf server(s)")
+        start_iperf_server_base(cfg, listener_host, start_port, stream_ids, parallel, numa, output_dir, "iperf_base", temp_file, timeout, temp_dir="/tmp/temp_files")
         time.sleep(cfg.sleep)           # it takes more for them to initiates! TODO: find a better way
 
         # run iperf client
-        logging.info("BASE: Starting iperf client")
+        logging.info("IBASE: Starting iperf client")
         #start_iperf_client_base(cfg, initiator_host, cfg.listener_ip, port, parallel, arg, temp_file, "iperf_base", output_dir, timeout)
-        start_iperf_client_base(cfg, initiator_host, cfg.listener_pub, port, parallel, arg, temp_file, "iperf_base", numa, output_dir, timeout)
+        start_iperf_client_base(cfg, initiator_host, cfg.listener_pub, stream_ids, listen_ports, parallel, numa, arg, temp_file, "iperf_base", output_dir, timeout)
 
         if not cfg.is_test:   
-            logging.info("BASE: Recording the RTT")
+            logging.info("IBASE: Recording the RTT")
             #record_ping(cfg, initiator_host, cfg.listener_ip, "iperf_base", output_dir)
             record_ping(cfg, initiator_host, cfg.listener_pub, "iperf_base", output_dir)
 
     except Exception as e:
-        raise RuntimeError(f"BASE: Runtime Error: {e}") from e
+        raise RuntimeError(f"IBASE: Runtime Error: {e}") from e
 
     finally:
-        if not cfg.is_test:
-            logging.info("BASE: Stopping the statkit monitoring on the hosts")
-            stop_statkit(cfg)
         cleanup_iperf(cfg)
+        if not cfg.is_test:
+            logging.info("IBASE: Stopping the statkit monitoring on the hosts")
+            stop_statkit(cfg)
 
 
 # ------------------------------------------------------------------------------
@@ -327,9 +347,7 @@ def run_mini_gst(
             #stream_ids.append(start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout))
             new_tunnel_id = (start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout))
             stream_ids.append(new_tunnel_id)
-            logging.debug("DEBUG:")
-            logging.debug("MGST: The Tunnel ID is %s and the total Tunnel IDs are %s", new_tunnel_id, stream_ids)
-            logging.debug("DEBUG:")
+            logging.debug("DEBUG:: The Tunnel ID is %s and the total Tunnel IDs are %s", new_tunnel_id, stream_ids)
 
         #for tunnel in tunnel_ids:
         for tunnel in stream_ids:
@@ -355,14 +373,11 @@ def run_mini_gst(
             #tunnel_ports.append(gw_port)
             contact_port, listen_ip, gw_port = init_initiator_env(cfg, tunnel)
             listen_ports.append(gw_port)
-            logging.debug("DEBUG:")
-            logging.debug("MGST: The Tunnel Port assigned to Tunnel ID %s is %s of total ports of %s on Gateway of IP %s", tunnel, gw_port, listen_ports, listen_ip)
-            logging.debug("DEBUG:")
+            logging.debug("DEBUG: The Tunnel Port assigned to Tunnel ID %s is %s of total ports of %s on Gateway of IP %s", tunnel, gw_port, listen_ports, listen_ip)
 
-        logging.info("MGST: Starting APS mini app containers")
+        logging.info("MGST: Starting the APS mini app containers on the endpoints")
         #start_mini_app(cfg, parallel, numa, "mini_gst", start_port, init_gw_ip, tunnel_ports, tunnel_ids, output_dir, tomo_file, timeout, module_path="/tmp/temp_files")
         start_mini_app(cfg, parallel, numa, "mini_gst", start_port, listen_ip, listen_ports, stream_ids, output_dir, tomo_file, timeout, module_path="/tmp/temp_files")
-        logging.info("MGST: Starting the APS mini app containers on the endpoints")
 
         if cfg.test == "stream":
             time.sleep(arg)
@@ -475,7 +490,9 @@ def experiment_main(cfg: Config) -> None:
     total_tests = total_runs * len(cfg.app)
     if not cfg.is_test:
         logging.info("SYS: Recording the system reports")
-        sys_report_dir = str(Path(cfg.report_dir) / f"{cfg.test}" / f"{cfg.numactl}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
+        sys_dir = (Path(cfg.report_dir) / f"{cfg.test}" / f"{cfg.numactl[0]}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
+        sys_report_dir = str(sys_dir)
+        logging.debug("THE SYSCONFIG DIR IS %s ", sys_report_dir)
         system_state_report(cfg, sys_report_dir)
 
     for idx, (numa, block, parallel, arg, splice, encrypt, run) in enumerate(test_config, start=1):
@@ -519,14 +536,14 @@ def experiment_main(cfg: Config) -> None:
             logging.info("GTR: Recording the Gridftp configuration")
             gridftp_report(cfg, output_dir)
             #time.sleep(cfg.sleep)
-            
+
             run_iperf_gst(
                 #cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
                 cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.tunnel_port,
+                parallel=parallel, arg=arg, temp_file=temp_file, start_port=cfg.tunnel_port,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa,
-                output_dir=output_dir,
+                numa=numa, output_dir=output_dir,
+                encrypt=encrypt
             )
             #time.sleep(cfg.sleep)
 
@@ -535,10 +552,10 @@ def experiment_main(cfg: Config) -> None:
             run_iperf_base(
                 # cfg, idx=idx, total_runs=total_runs, timeout=timeout,
                 cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                parallel=parallel, arg=arg, temp_file=temp_file, port=cfg.direct_port,
+                parallel=parallel, arg=arg, temp_file=temp_file, start_port=cfg.direct_port,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa,
-                output_dir=output_dir,
+                numa=numa, output_dir=output_dir,
+                encrypt=encrypt
             )
             #time.sleep(cfg.sleep)
 
