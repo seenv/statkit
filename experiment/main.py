@@ -48,8 +48,7 @@ def main() -> None:
 
         finally:
             logging.info("MAIN: Log file: %s", log_path)
-            # if "transfer" in cfg.test:
-            #     cleanup_file(cfg)
+            cleanup_file(cfg)
 
     if failures:
         failed_tests = ", ".join(test for test, _ in failures)

@@ -11,7 +11,8 @@ from config import Config
 def stop_rsync_daemon(
     cfg: Config, host: str, parallel: int,
     module_path: str = "/tmp/temp_files",
-    check: bool = True) -> None:
+    check: bool = True
+) -> None:
     for i in range(parallel):
         cp = run_subprocess(
             host, None,
@@ -89,7 +90,7 @@ def start_rsync_transfer_gst(
     out_dir: str, timeout: int,
     app: str, 
     module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
-    ) -> list[subprocess.CompletedProcess[str]]:
+) -> list[subprocess.CompletedProcess[str]]:
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
     
@@ -175,7 +176,7 @@ def start_rsync_transfer_base(
     out_dir: str, timeout: int,
     app: str, 
     module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
-    ) -> list[subprocess.CompletedProcess[str]]:
+) -> list[subprocess.CompletedProcess[str]]:
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
 
@@ -218,7 +219,7 @@ def start_rsync_ssh(
     out_dir: str, timeout: int,
     app: str, 
     module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
-    ) -> list[subprocess.CompletedProcess[str]]:
+) -> list[subprocess.CompletedProcess[str]]:
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
 

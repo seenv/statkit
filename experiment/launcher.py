@@ -107,6 +107,7 @@ def run_iperf_gst(
         for tunnel in stream_ids:
             status_tunnel(cfg, tunnel, "STOPPED")
             delete_tunnel(cfg, tunnel)
+        cleanup_file(cfg)
 
 
 # ------------------------------------------------------------------------------
@@ -157,6 +158,7 @@ def run_iperf_base(
         if not cfg.is_test:
             logging.info("IBASE: Stopping the statkit monitoring on the hosts")
             stop_statkit(cfg)
+        cleanup_file(cfg)
 
 
 # ------------------------------------------------------------------------------
@@ -242,6 +244,7 @@ def run_rsync_gst(
         for tunnel in stream_ids:
             status_tunnel(cfg, tunnel, "STOPPED")
             delete_tunnel(cfg, tunnel)
+        cleanup_file(cfg)
 
 
 # ------------------------------------------------------------------------------
@@ -303,17 +306,17 @@ def run_rsync_base(
             logging.info("RBASE: Stopping statkit monitoring")
             stop_statkit(cfg)
         stop_rsync_daemon(cfg, listener_host, parallel, "/tmp/temp_files")
-        #cleanup_file(cfg)
+        cleanup_file(cfg)
 
 
 # ------------------------------------------------------------------------------
 # Globus Transfer
 def run_globus_transfer(
-    cfg: Config, *, idx: int, total_runs: int, timeout: int, files: list[str], 
-    listener_host: str, initiator_host: str, numa: str, output_dir: str, 
-    arg: int, 
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, 
+    parallel: int, arg: int, files: list[str],
+    listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int
-    ) -> None:
+) -> None:
     print("\n")
     logging.info("----- Tests: %d / %d ------- Strarting Globus Transfer Tests", idx, total_runs)
     ids = get_collection_id(cfg)
@@ -328,8 +331,11 @@ def run_globus_transfer(
 
         # start globus transfer
         logging.info("GTR: Starting globus transfer")
-        start_globus_transfer(cfg, listener_collection_id, initiator_collection_id, transfer_label, 
-        arg, encrypt, files, "globus_gtr", output_dir, timeout)
+        start_globus_transfer(
+            cfg, listener_collection_id, initiator_collection_id, transfer_label, 
+            parallel,
+            arg, encrypt, files, "globus_gtr", output_dir, timeout
+        )
         if not cfg.is_test:
             # recording rtt
             logging.info("GTR: Recording the RTT")
@@ -345,6 +351,7 @@ def run_globus_transfer(
             stop_statkit(cfg)
             #hosts = list(cfg.hosts.ep.values())
             #restart_gridftp(cfg, hosts)
+        cleanup_file(cfg)
 
 
 # ------------------------------------------------------------------------------
@@ -515,13 +522,6 @@ def experiment_main(cfg: Config) -> None:
     )
 
     total_tests = total_runs * len(cfg.app)
-    if not cfg.is_test:
-        logging.info("SYS: Recording the system reports")
-        sys_dir = (Path(cfg.report_dir) / f"{cfg.test}" / f"{cfg.numactl[0]}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
-        sys_report_dir = str(sys_dir)
-        logging.debug("THE SYSCONFIG DIR IS %s ", sys_report_dir)
-        system_state_report(cfg, sys_report_dir)
-
     for idx, (numa, block, parallel, arg, splice, encrypt, run) in enumerate(test_config, start=1):
         print("\n")
         logging.info(
@@ -530,10 +530,12 @@ def experiment_main(cfg: Config) -> None:
         )
         test_idx = 0
         files = [] 
-        # if not cfg.is_test:
-        #     logging.info("SYS: Recording the system reports")
-        #     sys_report_dir = str(Path(cfg.report_dir) / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
-        #     system_state_report(cfg, sys_report_dir)
+        if idx == 1 and (not(cfg.is_test)):
+            logging.info("SYS: Recording the system reports")
+            sys_dir = (Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
+            sys_report_dir = str(sys_dir)
+            logging.debug("THE SYSCONFIG DIR IS %s ", sys_report_dir)
+            system_state_report(cfg, sys_report_dir)
 
         mode_dir = net_mode_dir(splice, encrypt)
         #temp_file = "file0.bin"
@@ -624,11 +626,10 @@ def experiment_main(cfg: Config) -> None:
             
             run_globus_transfer(
                 # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
-                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,files=files,
+                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                parallel=parallel, arg=arg, files=files,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa,
-                output_dir=output_dir, 
-                arg=arg, encrypt=encrypt,
+                numa=numa, output_dir=output_dir, encrypt=encrypt,
             )
             #time.sleep(cfg.sleep)
 

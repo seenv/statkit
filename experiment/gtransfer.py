@@ -4,7 +4,7 @@ from typing import Dict
 
 from config import Config, Role
 from utils import parse_size_to_bytes, parse_collection_uid
-from remote import run_subprocess
+from remote import run_subprocess, popen_subprocess
 
 
 #-------------------------------------------------------------------------------
@@ -57,40 +57,41 @@ def get_collection_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
 
 def start_globus_transfer(
     cfg: Config, src_cid: str, dst_cid: str, label: str, 
-    # contact_port: int, parallel: int, 
-    size: int, encr: int, file: str, app: str, out_dir: str,  timeout: int,
+    # contact_port: int, 
+    parallel: int, 
+    size: int, encr: int, files: list[str], app: str, out_dir: str,  timeout: int,
     # module_name: str = "transfer", module_path: str = "/tmp/temp_files", 
     check: bool = True,
     ) -> None:
     extra_arg = f"--encrypt" if encr == 1 else ""
     size_bytes = parse_size_to_bytes(size)
+    if parallel > 1:
+        with open("/tmp/globus_batch.txt" , "w", encoding="utf-8") as f:
+            for file_name in files:
+                f.write(
+                    f"/{file_name} "
+                    f"/{file_name}\n"
+                )
+        files_list = f"{shlex.quote(src_cid)} {shlex.quote(dst_cid)} --batch /tmp/globus_batch.txt "
+    else:
+        files_list = f"{shlex.quote(src_cid)}:{shlex.quote(files[0])} {shlex.quote(dst_cid)}:{shlex.quote(files[0])} "
     cp = run_subprocess(
         cfg.localhost, None,
         f"set +x; mkdir -p {shlex.quote(out_dir)} && "
-        f"SUBMISSION_ID=$(globus task generate-submission-id) && "
-        f"echo \"$SUBMISSION_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}_submission_id.txt && "
-        f"echo \"SUBMISSION_ID=$SUBMISSION_ID\" && "
-        f"echo \"START $(date '+%Y-%m-%d %H:%M:%S')\" | tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
+        f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "
-        f"globus transfer -v --submission-id \"$SUBMISSION_ID\" "
-        #f"--source-local-user cc --destination-local-user cc "
-        f"{shlex.quote(src_cid)}:{shlex.quote(file)} "
-        f"{shlex.quote(dst_cid)}:{shlex.quote(file)} "
-        f"--label {shlex.quote(label)} {extra_arg} "
-        f"--no-verify-checksum --fail-on-quota-errors "
-        f"--format unix --jmespath task_id --notify off "
-        f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt 2> {shlex.quote(out_dir)}/{shlex.quote(app)}_submit_stderr.log && "
-        #f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt "
-        #f"2> >(tee {shlex.quote(out_dir)}/{shlex.quote(app)}_submit_stderr.log >&2) && "
+        f"globus transfer -v  {files_list} --label {shlex.quote(label)} {extra_arg} "
+        f"--no-verify-checksum --fail-on-quota-errors --format unix --jmespath task_id --notify off "
+        f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt && "
         f"TASK_ID=$(cat {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt | tr -d '\"[:space:]') && "
-        f"echo \"TASK_ID=$TASK_ID\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
         f"globus task wait \"$TASK_ID\" 2>&1 | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
-        f"globus task show \"$TASK_ID\" "
-        f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_show.log && "
-        f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\" | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log",
+        f"globus task show -vvv \"$TASK_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}_task_show.log && "
+        f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
+        f"}} 2>&1 | tr '\\r' '\\n' "
+        f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
+        f"| tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log",
         localhost=cfg.localhost,
         timeout=timeout,
     )
-    logging.info(
-        "GTR: Completed Globus transfer of %s from %s to %s", file, src_cid, dst_cid)
-    logging.debug("GTR stdout:\n%s", cp.stdout)
+
+    logging.debug("GTR: Completed Globus transfer of %d files %s", parallel, cp.stdout)
