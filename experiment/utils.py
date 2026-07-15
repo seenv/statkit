@@ -136,30 +136,35 @@ def parse_size_to_bytes(size: str) -> int:
     return int(size) * (1024 ** 3)
 
 
-def make_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/temp_files") -> None:
+def make_file(cfg: Config, parallel: int, arg: int, files: list[str], file_path: str = "/tmp/temp_files") -> None:
     host = cfg.hosts.ep.get("listener")
-    #if ("iperf" in cfg.app or "rsync" in cfg.app) and "gtr" in cfg.app:
-    cp = run_subprocess(
-        host, None,
-        f"mkdir -p {shlex.quote(file_path)} && "
-        f"fallocate -l {size}G {shlex.quote(file_path)}/{shlex.quote(temp_file)} && "
-        f"test -f {shlex.quote(file_path)}/{shlex.quote(temp_file)} && "
-        f"du -h {shlex.quote(file_path)}/{shlex.quote(temp_file)}",
-        localhost=cfg.localhost,
-    )
+    size = parse_size_to_bytes(arg) #if cfg.test == "transfer" else 0
+    chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
+
+    for idx, file_name in enumerate(files):
+        file_size = chunk_size + (1 if idx < remainder else 0)
+        cp = run_subprocess(
+            host, None,
+            f"mkdir -p {shlex.quote(file_path)} && "
+            f"fallocate -l {file_size} {shlex.quote(file_path)}/{shlex.quote(file_name)} && "
+            f"test -f {shlex.quote(file_path)}/{shlex.quote(file_name)} && "
+            f"du -h {shlex.quote(file_path)}/{shlex.quote(file_name)} ",
+            localhost=cfg.localhost,
+        )
     logging.debug("FILE: Source file on %s: %s", host.upper(), cp.stdout.strip())
 
 
-def cleanup_file(cfg: Config, size: int, temp_file: str, file_path: str = "/tmp/temp_files") -> None:
+def cleanup_file(cfg: Config, file_path: str = "/tmp/temp_files") -> None:
     hosts = cfg.hosts.ep.values()
     for host in hosts:
+        #for file_name in files:
         cp = run_subprocess(
             host, None,
-            f"rm -f {shlex.quote(file_path)}/{shlex.quote(temp_file)} || true && "
-            f"du -h {shlex.quote(file_path)}/ || true ",
+            f"rm -f {shlex.quote(file_path)}/file*  ",
+            #f"du -h {shlex.quote(file_path)}/ || true ",
             localhost=cfg.localhost,
         )
-        logging.debug("FILE: Cleaning up the temp files on %s: %s", host.upper(), cp.stdout.strip())
+    logging.debug("FILE: Cleaning up the temp files on %s: %s", host.upper(), cp.stdout.strip())
 
 
 def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:

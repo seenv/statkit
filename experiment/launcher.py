@@ -34,7 +34,7 @@ from gtransfer import start_globus_transfer, get_collection_id
 def run_iperf_gst(
     cfg: Config, *, idx: int, total_runs: int, timeout: int, 
     parallel: int, arg: int, 
-    temp_file: str, 
+    files: list[str], 
     start_port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int,
 ) -> None:
@@ -43,6 +43,7 @@ def run_iperf_gst(
     stream_ids, listen_ports = [], []
     ids = get_stream_id(cfg)
     initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
+
     try:
         logging.info("IGST: Creating %d tunnels on Localhost", parallel)
         for i in range(parallel):
@@ -63,7 +64,7 @@ def run_iperf_gst(
             time.sleep(cfg.sleep)
 
         # init listener env 
-        logging.info("IGST: Bringing up %d tunnels on Endpoints")
+        logging.info("IGST: Bringing up %d tunnels on endpoints", parallel)
         for i, tunnel in enumerate(stream_ids):
             logging.debug("IGST: Bringing up the tunnel %s on Listener EP", tunnel)
             init_listener_env(cfg, cfg.listener_ip, tunnel, start_port + i)
@@ -72,19 +73,19 @@ def run_iperf_gst(
             status_tunnel(cfg, tunnel, "ACTIVE")
 
             # init initiator env + discover contact port
-            logging.debug("IGST: Bringing up the tunnel %s on Initiator EP")
+            logging.debug("IGST: Bringing up the tunnel %s on Initiator EP", tunnel)
             contact_port, listen_ip, gw_port = init_initiator_env(cfg, tunnel)
             listen_ports.append(contact_port)
             logging.debug("DEBUG: The Tunnel Fake Port assigned to Tunnel ID %s is %s of total ports of %s on Gateway of IP %s", tunnel, contact_port, listen_ports, listen_ip)
 
         # start iperf server
         logging.info("IGST: Starting iperf server")
-        start_iperf_server(cfg, listener_host, start_port, stream_ids, parallel, numa, output_dir, "iperf_gst", temp_file, timeout, temp_dir="/tmp/temp_files")
+        start_iperf_server(cfg, listener_host, start_port, stream_ids, parallel, numa, output_dir, "iperf_gst", files, timeout, temp_dir="/tmp/temp_files")
         time.sleep(cfg.sleep)           # it takes more for them to initiates! TODO: find a better way
 
         # run iperf client
         logging.info("IGST: Starting iperf client")        
-        start_iperf_client(cfg, initiator_host, stream_ids, listen_ports, parallel, numa, arg, temp_file, "iperf_gst", output_dir, timeout)        
+        start_iperf_client(cfg, initiator_host, stream_ids, listen_ports, parallel, numa, arg, files, "iperf_gst", output_dir, timeout)        
 
         if not cfg.is_test:
             # recording rtt
@@ -113,7 +114,7 @@ def run_iperf_gst(
 def run_iperf_base(
     cfg: Config, *, idx: int, total_runs: int, timeout: int, 
     parallel: int, arg: int,
-    temp_file: str, 
+    files: list[str], 
     start_port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int,
 ) -> None:
@@ -135,13 +136,13 @@ def run_iperf_base(
 
         # start iperf server
         logging.info("IBASE: Starting iperf server(s)")
-        start_iperf_server_base(cfg, listener_host, start_port, stream_ids, parallel, numa, output_dir, "iperf_base", temp_file, timeout, temp_dir="/tmp/temp_files")
+        start_iperf_server_base(cfg, listener_host, start_port, stream_ids, parallel, numa, output_dir, "iperf_base", files, timeout, temp_dir="/tmp/temp_files")
         time.sleep(cfg.sleep)           # it takes more for them to initiates! TODO: find a better way
 
         # run iperf client
         logging.info("IBASE: Starting iperf client")
         #start_iperf_client_base(cfg, initiator_host, cfg.listener_ip, port, parallel, arg, temp_file, "iperf_base", output_dir, timeout)
-        start_iperf_client_base(cfg, initiator_host, cfg.listener_pub, stream_ids, listen_ports, parallel, numa, arg, temp_file, "iperf_base", output_dir, timeout)
+        start_iperf_client_base(cfg, initiator_host, cfg.listener_pub, stream_ids, listen_ports, parallel, numa, arg, files, "iperf_base", output_dir, timeout)
 
         if not cfg.is_test:   
             logging.info("IBASE: Recording the RTT")
@@ -162,50 +163,65 @@ def run_iperf_base(
 # Rsync GST
 def run_rsync_gst(
     cfg: Config, *, idx: int, total_runs: int, timeout: int, 
-    parallel: int, arg: int, 
-    temp_file: str, 
-    port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
-    #listener_host: str, initiator_host: str, numa: str, output_dir: str,
+    parallel: int, arg: int, files: list[str], rsync_port: int, 
+    listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int,
 ) -> None:
     print("\n")
     logging.info("----- Test %d / %d: Starting RSync GST Test -----", idx, total_runs)
+    stream_ids, listen_ports = [], []
     ids = get_stream_id(cfg)
     initiator_stream_id, listener_stream_id = ids["initiator"], ids["listener"]
-    tunnel_label = f"{cfg.lease.replace(' ', '_')}-{cfg.test.replace(' ', '_')}-idx{idx}-tot{total_runs}"
-    logging.info("RGST: Creating the tunnel on Localhost")
-    tunnel_id = start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout)
+
     try:
-        logging.info("RGST: Waiting for tunnel to get activated")
-        status_tunnel(cfg, tunnel_id, "AWAITING_LISTENER")
+        logging.info("RGST: Creating the tunnel on Localhost")
+        for i in range(parallel):
+            logging.debug("IGST: Creating the tunnel # %d tunnels on Localhost", parallel)
+            tunnel_label = f"{cfg.lease.replace(' ', '_')}-{cfg.test.replace(' ', '_')}-idx{idx}-tot{total_runs}-parallel{i}"
+            new_tunnel_id = (start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout))
+            stream_ids.append(new_tunnel_id)
+
+        logging.info("RGST: Activating %d tunnels", parallel)
+        for tunnel in stream_ids:
+            logging.debug("RGST: Waiting for tunnel %s to get activated", tunnel)
+            status_tunnel(cfg, tunnel, "AWAITING_LISTENER")
+
         if not cfg.is_test:
             logging.info("RSYNC: Starting statkit monitoring")
             start_statkit(cfg, timeout, "rsync_gst", output_dir)   #size as duration which will be * 60s
             time.sleep(cfg.sleep)
 
         # init listener env 
-        logging.info("RGST: Bringing up the tunnel on Listener AP")
-        init_listener_env(cfg, cfg.listener_ip, tunnel_id, port)
-        # waiting till the tunnel gets activated
-        status_tunnel(cfg, tunnel_id, "ACTIVE")
-        # init initiator env + discover contact port
-        logging.info("RGST: Bringing up the tunnel on Initiator AP")
-        contact_port, init_gw_ip, gw_port = init_initiator_env(cfg, tunnel_id)
+        logging.info("RGST: Bringing up %d tunnels on endpoints", parallel)
+        for i, tunnel in enumerate(stream_ids):
+            logging.debug("RGST: Bringing up the tunnel %s on Listener EP", tunnel)
+            init_listener_env(cfg, cfg.listener_ip, tunnel, rsync_port + i)
+            
+            # waiting till the tunnel gets activated
+            status_tunnel(cfg, tunnel, "ACTIVE")
+
+            # init initiator env + discover contact port
+            logging.debug("IGST: Bringing up the tunnel %s on Initiator EP", tunnel)
+            contact_port, listen_ip, gw_port = init_initiator_env(cfg, tunnel)
+            listen_ports.append(contact_port)
+            logging.debug("DEBUG: The Tunnel Fake Port assigned to Tunnel ID %s is %s of total ports of %s on Gateway of IP %s", tunnel, contact_port, listen_ports, listen_ip)
         
         # start rsync daemon
         logging.info("RGST: Starting the rsync daemon on the host %s", listener_host.upper())
-        start_rsync_daemon_gst(
+        deamon_cps = start_rsync_daemon_gst(
             cfg, listener_host, 
-            port, tunnel_id, 
+            rsync_port, stream_ids, parallel,
             numa, output_dir, timeout,
-            "rsync_gst", "transfer", "/tmp/temp_files")
+            "rsync_gst", "transfer", "/tmp/temp_files"
+        )
     
         logging.info("RGST: Starting direct rsync transfer")
         start_rsync_transfer_gst(
-            cfg, listener_host, initiator_host,
-            tunnel_id, contact_port, parallel, arg,
-            temp_file, numa, output_dir, timeout,
-            "rsync_gst", "transfer", "/tmp/temp_files")
+            cfg, listener_host, initiator_host, listen_ip,
+            stream_ids, listen_ports, parallel, numa, arg,
+            files, output_dir, timeout,
+            "rsync_gst", "transfer", "/tmp/temp_files"
+        )
 
         if not cfg.is_test:
             logging.info("RGST: Recording RTT")        # it will run on the client
@@ -219,69 +235,81 @@ def run_rsync_gst(
         if not cfg.is_test:
             logging.info("RGST: Stopping statkit monitoring")
             stop_statkit(cfg)
-        stop_rsync_daemon(cfg, listener_host, "/tmp/temp_files")
-        stop_tunnel(cfg, tunnel_id)
-        status_tunnel(cfg, tunnel_id, "STOPPED")
-        delete_tunnel(cfg, tunnel_id)
-        # for tunnel in tunnel_ids:
-        #     stop_tunnel(cfg, tunnel)
-        # for tunnel in tunnel_ids:
-        #     status_tunnel(cfg, tunnel, "STOPPED")
-        #     delete_tunnel(cfg, tunnel)
+        stop_rsync_daemon(cfg, listener_host, parallel, "/tmp/temp_files")
+        logging.info("RGST: Stopping the tunnel(s)")
+        for tunnel in stream_ids:
+            stop_tunnel(cfg, tunnel)
+        for tunnel in stream_ids:
+            status_tunnel(cfg, tunnel, "STOPPED")
+            delete_tunnel(cfg, tunnel)
 
 
 # ------------------------------------------------------------------------------
 # Rsync Base
 def run_rsync_base(
-    cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, 
+    parallel: int, arg: int, files: list[str], rsync_port: int, 
     listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int
 ) -> None:
+
     print("\n")
     logging.info("----- Test %d / %d: Starting RSync Direct Test -----", idx, total_runs)
+    stream_ids, listen_ports = [], []
+    listen_ip = cfg.listener_pub
     try:
+        for i in range(parallel):
+            listen_ports.append(rsync_port + i)
+            stream_ids.append(rsync_port + i)
+
         if not cfg.is_test:
-            logging.info("RSYNC: Starting statkit monitoring")
+            logging.info("RBASE: Starting statkit monitoring")
             start_statkit(cfg, timeout, "rsync_base", output_dir)   #size as duration which will be * 60s
             time.sleep(cfg.sleep)
 
         if encrypt == 1:
-            logging.info("RSYNC: Starting direct rsync transfer")
-            start_rsync_ssh(cfg, listener_host, initiator_host, temp_file, numa, output_dir, cfg.rsync_port, timeout,
-            "/tmp/temp_files",
-            )
+            logging.info("RBASE: Starting direct rsync transfer")
+            start_rsync_ssh(
+                cfg, listener_host, initiator_host, listen_ip,
+                stream_ids, listen_ports, parallel, numa, arg,
+                files, output_dir, timeout,
+                "rsync_base", "transfer", "/tmp/temp_files")
         else:
-            logging.info("RSYNC: Starting the rsync daemon on the host %s", listener_host.upper())
+            logging.info("RBASE: Starting the rsync daemon on the host %s", listener_host.upper())
             start_rsync_daemon_base(
-                cfg, listener_host, numa, output_dir, cfg.rsync_port, timeout,
-                "rsync_base", 
-                cfg.test, "/tmp/temp_files")
-            logging.info("RSYNC: Starting direct rsync transfer")
+                cfg, listener_host, 
+                rsync_port, stream_ids, parallel,
+                numa, output_dir, timeout,
+                "rsync_base", "transfer", "/tmp/temp_files")
+            time.sleep(cfg.sleep)
 
+            logging.info("RBASE: Starting direct rsync transfer")
             start_rsync_transfer_base(
-                cfg, listener_host, initiator_host, temp_file, numa, output_dir, cfg.rsync_port, timeout,
-                "rsync_base", 
-                cfg.test, "/tmp/temp_files")
-        
+                cfg, listener_host, initiator_host, listen_ip,
+                stream_ids, listen_ports, parallel, numa, arg,
+                files, output_dir, timeout,
+                "rsync_base", "transfer", "/tmp/temp_files")
+
         if not cfg.is_test:
-            logging.info("RSYNC: Recording RTT")        # it will run on the client
+            logging.info("RBASE: Recording RTT")        # it will run on the client
             #record_ping(cfg, initiator_host, cfg.listener_ip, "iperf_gst", output_dir)
             record_ping(cfg, initiator_host, cfg.listener_pub, "rsync_base", output_dir)
 
     except Exception as e:
-        raise RuntimeError(f"RSYNC: Runtime Error: {e}") from e
+        raise RuntimeError(f"RBASE: Runtime Error: {e}") from e
 
     finally:
         if not cfg.is_test:
-            logging.info("RSYNC: Stopping statkit monitoring")
+            logging.info("RBASE: Stopping statkit monitoring")
             stop_statkit(cfg)
-        stop_rsync_daemon(cfg, listener_host, "/tmp/temp_files")
+        stop_rsync_daemon(cfg, listener_host, parallel, "/tmp/temp_files")
+        #cleanup_file(cfg)
 
 
 # ------------------------------------------------------------------------------
 # Globus Transfer
 def run_globus_transfer(
-    cfg: Config, *, idx: int, total_runs: int, timeout: int, temp_file: str, 
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, files: list[str], 
     listener_host: str, initiator_host: str, numa: str, output_dir: str, 
     arg: int, 
     encrypt: int
@@ -301,7 +329,7 @@ def run_globus_transfer(
         # start globus transfer
         logging.info("GTR: Starting globus transfer")
         start_globus_transfer(cfg, listener_collection_id, initiator_collection_id, transfer_label, 
-        arg, encrypt, temp_file, "globus_gtr", output_dir, timeout)
+        arg, encrypt, files, "globus_gtr", output_dir, timeout)
         if not cfg.is_test:
             # recording rtt
             logging.info("GTR: Recording the RTT")
@@ -461,12 +489,11 @@ def run_mini_base(
 # Main
 def experiment_main(cfg: Config) -> None:
     blocks = cfg.blocks
-    parallels = cfg.parallels if cfg.test == "stream" else [1]
+    parallels = cfg.parallels #if cfg.test == "stream" else [1]
     args = cfg.time_frames if cfg.test == "stream" else cfg.file_sizes
     numactl = cfg.numactl
     net_modes = build_net_modes(cfg.splice, cfg.encrypt)
     runs = cfg.run_num
-
     test_config = (
         (numa, block, parallel, arg, splice, encrypt, run)
         for numa in numactl
@@ -502,20 +529,22 @@ def experiment_main(cfg: Config) -> None:
             idx, idx * len(cfg.app), total_tests, numa, block, arg, splice, encrypt, run,
         )
         test_idx = 0
+        files = [] 
         # if not cfg.is_test:
         #     logging.info("SYS: Recording the system reports")
         #     sys_report_dir = str(Path(cfg.report_dir) / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
         #     system_state_report(cfg, sys_report_dir)
 
         mode_dir = net_mode_dir(splice, encrypt)
-        temp_file = f"{arg}G.bin"
+        #temp_file = "file0.bin"
+        files = [f"file{i}.bin" for i in range(parallel)]
+
         if cfg.test == "transfer":
             output_path = (
                 Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / f"B{block}" / f"P{parallel}" / f"S{arg}" / mode_dir / f"R{run}"
             )
             output_dir = str(output_path)
-            #make_output(cfg, output_dir)
-            make_file(cfg, arg, temp_file)
+            make_file(cfg, parallel, arg, files)
 
         elif cfg.test == "stream":
             output_path = (
@@ -540,7 +569,7 @@ def experiment_main(cfg: Config) -> None:
             run_iperf_gst(
                 #cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
                 cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                parallel=parallel, arg=arg, temp_file=temp_file, start_port=cfg.tunnel_port,
+                parallel=parallel, arg=arg, files=files, start_port=cfg.tunnel_port,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 numa=numa, output_dir=output_dir,
                 encrypt=encrypt
@@ -550,12 +579,10 @@ def experiment_main(cfg: Config) -> None:
         if "ibase" in cfg.app:
             test_idx += 1
             run_iperf_base(
-                # cfg, idx=idx, total_runs=total_runs, timeout=timeout,
                 cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                parallel=parallel, arg=arg, temp_file=temp_file, start_port=cfg.direct_port,
+                parallel=parallel, arg=arg, files=files, start_port=cfg.direct_port,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa, output_dir=output_dir,
-                encrypt=encrypt
+                numa=numa, output_dir=output_dir, encrypt=encrypt
             )
             #time.sleep(cfg.sleep)
 
@@ -571,30 +598,20 @@ def experiment_main(cfg: Config) -> None:
             gridftp_report(cfg, output_dir)
             
             run_rsync_gst(
-                # cfg, idx=idx, total_runs=total_runs, timeout=timeout, 
                 cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                parallel=parallel, arg=arg, 
-                temp_file=temp_file,
-                port=cfg.rsync_port,
+                parallel=parallel, arg=arg, files=files, rsync_port=cfg.rsync_port,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa, output_dir=output_dir,
-                encrypt=encrypt,
+                numa=numa, output_dir=output_dir, encrypt=encrypt,
             )
 
 
         if "rbase" in cfg.app and cfg.test == "transfer":
             test_idx += 1
             run_rsync_base(
-                # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
-                # cfg, idx=idx, total_runs=total_runs, timeout=timeout, 
                 cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                #parallel=parallel, arg=arg, 
-                temp_file=temp_file,
-                #port=cfg.rsync_port,
+                parallel=parallel, arg=arg, files=files, rsync_port=cfg.rsync_port,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa,
-                output_dir=output_dir,
-                encrypt=encrypt,
+                numa=numa, output_dir=output_dir, encrypt=encrypt,
             )
             #time.sleep(cfg.sleep)
 
@@ -607,7 +624,7 @@ def experiment_main(cfg: Config) -> None:
             
             run_globus_transfer(
                 # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
-                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,temp_file=temp_file,
+                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,files=files,
                 listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                 numa=numa,
                 output_dir=output_dir, 
@@ -654,5 +671,4 @@ def experiment_main(cfg: Config) -> None:
             )
 
         time.sleep(cfg.sleep)
-        if cfg.test == "transfer":
-            cleanup_file(cfg, arg, temp_file)
+

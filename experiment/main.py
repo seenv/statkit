@@ -6,7 +6,7 @@ import traceback
 #from config import get_config
 from config import get_configs
 from launcher import experiment_main
-from utils import setup_logging, send_ntfy
+from utils import setup_logging, send_ntfy, cleanup_file
 
 
 def main() -> None:
@@ -48,6 +48,8 @@ def main() -> None:
 
         finally:
             logging.info("MAIN: Log file: %s", log_path)
+            # if "transfer" in cfg.test:
+            #     cleanup_file(cfg)
 
     if failures:
         failed_tests = ", ".join(test for test, _ in failures)

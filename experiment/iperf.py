@@ -19,19 +19,19 @@ def start_iperf_server(
     numa: str,
     out_dir: str, 
     app: str, 
-    file: str,
+    files: list[str],
     timeout: int, 
     temp_dir: str = "/tmp/temp_files",
     retries: int = 100,
     check: bool = True,
-) -> subprocess.Popen[str]:
+) -> list[subprocess.Popen[str]]:
 #def start_iperf_server(cfg: Config, host: str, port: int, tunnel_id: str, file: str, app: str, numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
     if not (len(stream_ids) == parallel):
         raise RuntimeError(f"Expected all lists to have length parallel={parallel}, but got tunnel ids={len(stream_ids)}")
-    launch_processes = []
-    extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)}" if cfg.test == "transfer" else ""
+    processes = []
 
     for i, stream_id in enumerate(stream_ids):
+        extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(files[i])}" if cfg.test == "transfer" else ""
         # numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
         # numa_node, numa_cpus = get_numa_node(cfg, host, dev) if numa == "numa" else (None, "")
         # #cpu_count = max(2, parallel)
@@ -46,8 +46,7 @@ def start_iperf_server(
             host, cfg.remote_env,
             f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
-            f"globus-streams-launch "
-            f"-p {start_port + i} {shlex.quote(stream_id)} "                                    #f"numactl --cpunodebind=0 --preferred=0 "
+            f"globus-streams-launch -p {start_port + i} {shlex.quote(stream_id)} "                                    #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -s -p {start_port + i} -1 --timestamps --forceflush "                      #f"iperf3 -s -B {cfg.listener_ip} -p {port} -1 --timestamps  --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
@@ -56,7 +55,7 @@ def start_iperf_server(
             f"exit $rc ",
             localhost=cfg.localhost,
         )
-        launch_processes.append(cp)
+        processes.append(cp)
         logging.debug("IGST: Started iperf3 server with tunnel ID %s and port of %d on host %s", stream_id, (start_port + i), host.upper())
 
 
@@ -67,24 +66,26 @@ def start_iperf_client(
     temp_dir: str = "/tmp/temp_files",
     retries: int = 100,
     check: bool = True,
-) -> subprocess.CompletedProcess[str]:
+) -> list[subprocess.CompletedProcess[str]]:
 # def start_iperf_client(cfg: Config, host: str, tunnel_id: str, contact_port: int, parallel: int, arg: int, file: str, app: str, numa: str, out_dir: str, timeout: int, temp_dir: str = "/tmp/temp_files", check: bool = True) -> subprocess.CompletedProcess[str]:
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
     
     processes = []
-    throughput, bytes_transferred, retransmissions = 0, 0, 0
+    duration, throughput, bytes_transferred, retransmissions = 0, 0, 0, 0
     size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
+    chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
     #extra_arg = f"-Z -R -n {arg}G -F {shlex.quote(temp_dir)}/{shlex.quote(file)} " if cfg.test == "transfer" else f"-P {parallel} -i 10 -O 10 -Z -R -t {arg} "    
     # extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
-    extra_arg = f"-n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
-    
+
     for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
+        file_size = chunk_size + (1 if i < remainder else 0)
+        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
         #cp = run_subprocess(
         cp = popen_subprocess(
             host, cfg.remote_env,
             f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}{i}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
             "globus-streams-launch "
             f"{shlex.quote(stream_id)} "                                                    #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -c globus.{shlex.quote(stream_id)} -p {listen_port} "                 #f"iperf3 -c globus.{shlex.quote(tunnel_id)} -B {cfg.initiator_ip} -p {contact_port} "
@@ -117,13 +118,14 @@ def start_iperf_client(
             "iPerf3 log %s Throughput(Gbps): %.6f | Duration(sec): %.2f | Retransmits: %s | Size: %.4f",
             host.upper(), bits_per_second / 1e9, seconds, retransmits, size_bytes / 1e9
         )
+        duration = max(duration, seconds)
         throughput += (bits_per_second / 1e9)
         bytes_transferred += (size_bytes / 1e9)
         retransmissions += retransmits
 
     logging.info(
         "IGST: iPerf3 log on %s: SUM of %d Stream(s): Throughput(Gbps): %.6f | Duration(sec): %.2f | Retransmits: %s | Size: %.4f",
-        host.upper(), parallel, throughput, seconds, retransmissions, bytes_transferred
+        host.upper(), parallel, throughput, duration, retransmissions, bytes_transferred
     )
 
 #-------------------------------------------------------------------------------
@@ -137,19 +139,19 @@ def start_iperf_server_base(
     numa: str,
     out_dir: str, 
     app: str, 
-    file: str,
+    files: list[str],
     timeout: int, 
     temp_dir: str = "/tmp/temp_files",
     retries: int = 100,
     check: bool = True,
-) -> subprocess.Popen[str]:
+) -> list[subprocess.Popen[str]]:
 #def start_iperf_server_base(cfg: Config, host: str, port: int, file: str, app: str, numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
     if not (len(stream_ids) == parallel):
         raise RuntimeError(f"Expected all lists to have length parallel={parallel}, but got tunnel ids={len(stream_ids)}")
-    launch_processes = []
-    extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)}" if cfg.test == "transfer" else ""
+    processes = []
 
     for i, stream_id in enumerate(stream_ids):
+        extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(files[i])}" if cfg.test == "transfer" else ""
         # numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
         # numa_node, numa_cpus = get_numa_node(cfg, host, dev) if numa == "numa" else (None, "")
         # #cpu_count = max(2, parallel)
@@ -173,7 +175,7 @@ def start_iperf_server_base(
             localhost=cfg.localhost,
         )
         #logging.info("IBASE: Started iperf3 server on %s", host.upper())
-        launch_processes.append(cp)
+        processes.append(cp)
         logging.debug("IBASE: Started iperf3 server on port %d on host %s", (start_port + i), host.upper())
 
 
@@ -182,26 +184,27 @@ def start_iperf_client_base(
     listener_pub: str, 
     stream_ids: Sequence[str], listen_ports: Sequence[int],
     parallel: int, numa: str, arg: int, 
-    file: str, app: str,  out_dir: str, timeout: int, 
+    file: str, 
+    app: str,  out_dir: str, timeout: int, 
     temp_dir: str = "/tmp/temp_files",
     retries: int = 100,
     check: bool = True,
-) -> subprocess.CompletedProcess[str]:
+) -> list[subprocess.CompletedProcess[str]]:
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
 
     processes = []
     throughput, bytes_transferred, retransmissions = 0, 0, 0
-    # size = parse_size_to_bytes(arg) if cfg.test == "transfer" else None
-    size = parse_size_to_bytes(arg) if cfg.test == "transfer" else None
-    #extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(file)} -n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
-    extra_arg = f"-n {size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+    size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
+    chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
     for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
+        file_size = chunk_size + (1 if i < remainder else 0)
+        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
         #cp = run_subprocess(
         cp = popen_subprocess(
             host, cfg.remote_env,
             f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}{i}-time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -c {listener_pub} -p {listen_port} "                                                      #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
             f"-Z -R -P 1 --timestamps --forceflush "
             f"{extra_arg} "
@@ -231,15 +234,15 @@ def start_iperf_client_base(
             "iPerf3 log %s Throughput(Gbps): %.6f | Duration(sec): %.2f | Retransmits: %s | Size: %.4f",
             host.upper(), bits_per_second / 1e9, seconds, retransmits, size_bytes / 1e9
         )
+        duration = max(duration, seconds)
         throughput += (bits_per_second / 1e9)
         bytes_transferred += (size_bytes / 1e9)
         retransmissions += retransmits
 
     logging.info(
         "IBASE: iPerf3 log on %s: SUM of %d Stream(s): Throughput(Gbps): %.6f | Duration(sec): %.2f | Retransmits: %s | Size: %.4f",
-        host.upper(), parallel, throughput, seconds, retransmissions, bytes_transferred
+        host.upper(), parallel, throughput, duration, retransmissions, bytes_transferred
     )
-
 
 
 def cleanup_iperf(cfg: Config, check: bool = True) -> None:
