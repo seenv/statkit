@@ -16,13 +16,16 @@ def stop_rsync_daemon(
     for i in range(parallel):
         cp = run_subprocess(
             host, None,
-            f"if [ -f {shlex.quote(module_path)}/rsyncd{i}.pid ] && "
-            f"kill -9 $(cat {shlex.quote(module_path)}/rsyncd{i}.pid) 2>/dev/null; then "
+            #f"if [ -f {shlex.quote(module_path)}/rsyncd{i}.pid ] && "
+            f"if [ -f {shlex.quote(module_path)}/rsyncd.pid ]; then "
+            #f"kill -9 $(cat {shlex.quote(module_path)}/rsyncd{i}.pid) 2>/dev/null; then "
+            #f" kill $(cat {shlex.quote(module_path)}/rsyncd.pid) "
             f"  echo 'stopping existing rsync daemon from pid file'; "
             f"  kill $(cat {shlex.quote(module_path)}/rsyncd{i}.pid) 2>/dev/null || true; "
             f"  sleep 1; "
             f"fi; "
-            f"rm -f {shlex.quote(module_path)}/rsyncd{i}.pid "
+            f"rm -f "
+            f"{shlex.quote(module_path)}/rsyncd{i}.pid "
             f"{shlex.quote(module_path)}/rsyncd{i}.conf "
             f"{shlex.quote(module_path)}/rsyncd{i}.lock; ",
             localhost=cfg.localhost
@@ -70,14 +73,14 @@ def start_rsync_daemon_gst(
             f"    list = yes\n"
             f"EOF\n"
 
-            f"globus-streams-launch -p {rsync_port + i} {shlex.quote(stream_id)} "
-            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd{i}.conf --port={rsync_port + i} "
+            f"globus-streams-launch -p {rsync_port + (i * 2)} {shlex.quote(stream_id)} "
+            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd{i}.conf --port={rsync_port + (i * 2)} "
             f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-daemon{i}.log; ",
             localhost=cfg.localhost,
             #timeout=timeout,
         )
         processes.append(cp)
-        logging.debug("RGST: Started rsync daemon on %s:%s", src_host.upper(), rsync_port + i)
+        logging.debug("RGST: Started rsync daemon on %s:%s", src_host.upper(), rsync_port + (i * 2))
         #logging.debug("RGST stdout:\n%s", cp.stdout)
     return processes
 
@@ -97,6 +100,7 @@ def start_rsync_transfer_gst(
     processes = []
     for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
         rsync_url = f"rsync://globus.{stream_id}:{listen_port}/{module_name}{i}/{files[i]}"
+        #rsync_files = " ".join(shlex.quote(f"rsync://globus.{stream_id}:{listen_port}/{module_name}/{file_name}")for file_name in files)
         logging.debug("RSYNC URL: %s", str(rsync_url))
         cp = popen_subprocess(
             dst_host, None, 
@@ -106,7 +110,8 @@ def start_rsync_transfer_gst(
             f"globus-streams-launch {shlex.quote(stream_id)} "  
             f"rsync -avvv --info=progress2,stats2 --no-compress --no-checksum "
             f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
-            f"{shlex.quote(rsync_url)} {shlex.quote(module_path)}/{shlex.quote(files[i])} "
+            #f"{shlex.quote(rsync_url)} {shlex.quote(module_path)}/{shlex.quote(files[i])} "
+            f"{shlex.quote(rsync_url)} {shlex.quote(module_path)}/ "
             f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-log.log; "
             f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
             f"}} 2>&1 | tr '\\r' '\\n' "
@@ -157,13 +162,13 @@ def start_rsync_daemon_base(
             f"    list = yes\n"
             f"EOF\n"
         
-            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd{i}.conf --port={rsync_port + i} "
+            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd{i}.conf --port={rsync_port + (i * 2)} "
             f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-daemon{i}.log; ",
             localhost=cfg.localhost,
             #timeout=timeout,
         )
         processes.append(cp)
-        logging.debug("RBASE: Started rsync daemon on %s:%s", src_host.upper(), rsync_port + i)
+        logging.debug("RBASE: Started rsync daemon on %s:%s", src_host.upper(), rsync_port + (i * 2))
         #logging.debug("RGST stdout:\n%s", cp.stdout)
     return processes
 

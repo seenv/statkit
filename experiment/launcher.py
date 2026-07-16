@@ -26,7 +26,7 @@ from apsmini import start_mini_app, wait_finish_transfer, stop_mini_containers, 
 from iperf import start_iperf_server, start_iperf_client, start_iperf_server_base, start_iperf_client_base, cleanup_iperf
 from rsync import stop_rsync_daemon, start_rsync_daemon_gst
 from rsync import start_rsync_transfer_gst, start_rsync_daemon_base, start_rsync_transfer_base, start_rsync_ssh
-from gtransfer import start_globus_transfer, get_collection_id
+from gtransfer import get_collection_id, start_globus_transfer, start_globus_transfer_multiple
 
 
 # ------------------------------------------------------------------------------
@@ -67,7 +67,7 @@ def run_iperf_gst(
         logging.info("IGST: Bringing up %d tunnels on endpoints", parallel)
         for i, tunnel in enumerate(stream_ids):
             logging.debug("IGST: Bringing up the tunnel %s on Listener EP", tunnel)
-            init_listener_env(cfg, cfg.listener_ip, tunnel, start_port + i)
+            init_listener_env(cfg, cfg.listener_ip, tunnel, start_port + (i * 2))
             
             # waiting till the tunnel gets activated
             status_tunnel(cfg, tunnel, "ACTIVE")
@@ -81,7 +81,7 @@ def run_iperf_gst(
         # start iperf server
         logging.info("IGST: Starting iperf server")
         start_iperf_server(cfg, listener_host, start_port, stream_ids, parallel, numa, output_dir, "iperf_gst", files, timeout, temp_dir="/tmp/temp_files")
-        time.sleep(cfg.sleep)           # it takes more for them to initiates! TODO: find a better way
+        time.sleep(cfg.sleep)
 
         # run iperf client
         logging.info("IGST: Starting iperf client")        
@@ -96,7 +96,6 @@ def run_iperf_gst(
         raise RuntimeError(f"IGST: Runtime Error: {e}") from e
 
     finally:
-        # TODO: check why monitor finishes before transfer!
         cleanup_iperf(cfg)
         if not cfg.is_test:
             logging.info("IGST: Stopping the statkit monitoring on the hosts")
@@ -107,7 +106,27 @@ def run_iperf_gst(
         for tunnel in stream_ids:
             status_tunnel(cfg, tunnel, "STOPPED")
             delete_tunnel(cfg, tunnel)
-        cleanup_file(cfg)
+    # finally:
+    #     if not cfg.is_test:
+    #         try:
+    #             stop_statkit(cfg)
+    #         except Exception:
+    #             logging.exception("IGST: Failed to stop statkit")
+    #     try:
+    #         cleanup_iperf(cfg)
+    #     except Exception:
+    #         logging.exception("IGST: Failed to clean up iperf processes")
+    #     for tunnel in stream_ids:
+    #         try:
+    #             stop_tunnel(cfg, tunnel)
+    #         except Exception:
+    #             logging.exception("IGST: Failed to stop tunnel %s", tunnel)
+    #     for tunnel in stream_ids:
+    #         try:
+    #             status_tunnel(cfg, tunnel, "STOPPED")
+    #             delete_tunnel(cfg, tunnel)
+    #         except Exception:
+    #             logging.exception("IGST: Failed to delete tunnel %s", tunnel)
 
 
 # ------------------------------------------------------------------------------
@@ -132,8 +151,8 @@ def run_iperf_base(
             time.sleep(cfg.sleep)
 
         for i in range(parallel):
-            listen_ports.append(start_port + i)
-            stream_ids.append(start_port + i)
+            listen_ports.append(start_port + (i * 2))
+            stream_ids.append(listen_ip)
 
         # start iperf server
         logging.info("IBASE: Starting iperf server(s)")
@@ -158,7 +177,6 @@ def run_iperf_base(
         if not cfg.is_test:
             logging.info("IBASE: Stopping the statkit monitoring on the hosts")
             stop_statkit(cfg)
-        cleanup_file(cfg)
 
 
 # ------------------------------------------------------------------------------
@@ -197,7 +215,7 @@ def run_rsync_gst(
         logging.info("RGST: Bringing up %d tunnels on endpoints", parallel)
         for i, tunnel in enumerate(stream_ids):
             logging.debug("RGST: Bringing up the tunnel %s on Listener EP", tunnel)
-            init_listener_env(cfg, cfg.listener_ip, tunnel, rsync_port + i)
+            init_listener_env(cfg, cfg.listener_ip, tunnel, rsync_port + (i * 2))
             
             # waiting till the tunnel gets activated
             status_tunnel(cfg, tunnel, "ACTIVE")
@@ -244,7 +262,6 @@ def run_rsync_gst(
         for tunnel in stream_ids:
             status_tunnel(cfg, tunnel, "STOPPED")
             delete_tunnel(cfg, tunnel)
-        cleanup_file(cfg)
 
 
 # ------------------------------------------------------------------------------
@@ -262,8 +279,8 @@ def run_rsync_base(
     listen_ip = cfg.listener_pub
     try:
         for i in range(parallel):
-            listen_ports.append(rsync_port + i)
-            stream_ids.append(rsync_port + i)
+            listen_ports.append(rsync_port + (i * 2))
+            stream_ids.append(listen_ip)
 
         if not cfg.is_test:
             logging.info("RBASE: Starting statkit monitoring")
@@ -306,7 +323,6 @@ def run_rsync_base(
             logging.info("RBASE: Stopping statkit monitoring")
             stop_statkit(cfg)
         stop_rsync_daemon(cfg, listener_host, parallel, "/tmp/temp_files")
-        cleanup_file(cfg)
 
 
 # ------------------------------------------------------------------------------
@@ -331,7 +347,12 @@ def run_globus_transfer(
 
         # start globus transfer
         logging.info("GTR: Starting globus transfer")
-        start_globus_transfer(
+        # start_globus_transfer(
+        #     cfg, listener_collection_id, initiator_collection_id, transfer_label, 
+        #     parallel,
+        #     arg, encrypt, files, "globus_gtr_s", output_dir, timeout
+        # )
+        start_globus_transfer_multiple(
             cfg, listener_collection_id, initiator_collection_id, transfer_label, 
             parallel,
             arg, encrypt, files, "globus_gtr", output_dir, timeout
@@ -351,7 +372,6 @@ def run_globus_transfer(
             stop_statkit(cfg)
             #hosts = list(cfg.hosts.ep.values())
             #restart_gridftp(cfg, hosts)
-        cleanup_file(cfg)
 
 
 # ------------------------------------------------------------------------------
@@ -397,7 +417,7 @@ def run_mini_gst(
         #for i, tunnel in enumerate(tunnel_ids):
         for i, tunnel in enumerate(stream_ids):
             logging.info("MGST: Bringing up the tunnels on Listener AP")
-            init_listener_env(cfg, cfg.listener_ip, tunnel, start_port + i)
+            init_listener_env(cfg, cfg.listener_ip, tunnel, start_port + (i * 2))
 
             # waiting till the tunnel gets activated
             status_tunnel(cfg, tunnel, "ACTIVE")
@@ -466,8 +486,8 @@ def run_mini_base(
 
         #for i, tunnel in enumerate(tunnel_ids):
         for i in range(parallel):
-            listen_ports.append(start_port + i)
-            stream_ids.append(start_port + i)
+            listen_ports.append(start_port + (i * 2))
+            stream_ids.append(listen_ip)
 
         logging.info("MBASE: Starting APS mini app containers")
         start_mini_app(cfg, parallel, numa, "mini_base", start_port, listen_ip, listen_ports, stream_ids, output_dir, tomo_file, timeout, module_path="/tmp/temp_files")
@@ -520,156 +540,185 @@ def experiment_main(cfg: Config) -> None:
         * len(net_modes)
         * runs
     )
-
-    total_tests = total_runs * len(cfg.app)
+    test_apps = ["iperf", "ibase", "mini", "mbase"] if cfg.test == "stream" else ["iperf", "ibase", "rsync", "rbase", "gtr"]
+    total_tests = total_runs * len(cfg.test)
     for idx, (numa, block, parallel, arg, splice, encrypt, run) in enumerate(test_config, start=1):
-        print("\n")
-        logging.info(
-            "--------------- Config: %d:%d / %d : NUMA %s / blocksize %s / arg %s / splice %s / encrypt %s / run %s ---------------",
-            idx, idx * len(cfg.app), total_tests, numa, block, arg, splice, encrypt, run,
-        )
-        test_idx = 0
-        files = [] 
-        if idx == 1 and (not(cfg.is_test)):
-            logging.info("SYS: Recording the system reports")
-            sys_dir = (Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
-            sys_report_dir = str(sys_dir)
-            logging.debug("THE SYSCONFIG DIR IS %s ", sys_report_dir)
-            system_state_report(cfg, sys_report_dir)
-
+        created_files = False
         mode_dir = net_mode_dir(splice, encrypt)
-        #temp_file = "file0.bin"
-        files = [f"file{i}.bin" for i in range(parallel)]
-
-        if cfg.test == "transfer":
-            output_path = (
-                Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / f"B{block}" / f"P{parallel}" / f"S{arg}" / mode_dir / f"R{run}"
+        context = (
+            f"test={cfg.test}, config={idx}/{total_runs}, "
+            f"numa={numa}, block={block}, parallel={parallel}, "
+            f"arg={arg}, splice={splice}, encrypt={encrypt}, run={run}"
+        )
+        try:
+            print("\n")
+            logging.info(
+                "--------------- Config: %d:%d / %d : NUMA %s / blocksize %s / arg %s / splice %s / encrypt %s / run %s / parallel %s ---------------",
+                idx, idx * len(test_apps), total_tests, numa, block, arg, splice, encrypt, run, parallel
             )
-            output_dir = str(output_path)
-            make_file(cfg, parallel, arg, files)
+            test_idx, files = 0, []
+            if idx == 1 and (not(cfg.is_test)):
+                logging.info("SYS: Recording the system reports")
+                sys_dir = (Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
+                sys_report_dir = str(sys_dir)
+                logging.debug("THE SYSCONFIG DIR IS %s ", sys_report_dir)
+                system_state_report(cfg, sys_report_dir)
 
-        elif cfg.test == "stream":
-            output_path = (
-                Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / f"B{block}" / f"P{parallel}" / f"T{arg}" / mode_dir / f"R{run}"
+            files = [f"file{i}.bin" for i in range(parallel)]
+
+            if cfg.test == "transfer":
+                output_path = (
+                    Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / f"B{block}" / f"P{parallel}" / f"S{arg}" / mode_dir / f"R{run}"
+                )
+                output_dir = str(output_path)
+                make_file(cfg, parallel, arg, files)
+                created_files = True
+
+            elif cfg.test == "stream":
+                output_path = (
+                    Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / f"B{block}" / f"P{parallel}" / f"T{arg}" / mode_dir / f"R{run}"
+                )
+                output_dir = str(output_path)
+            timeout = (arg * 120)
+
+            if "iperf" in cfg.app:
+                test_idx += 1
+                if block != last_block or splice != last_splice or encrypt != last_encrypt:
+                    logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
+                    gridftp_config(cfg, block, splice, encrypt, output_dir)
+                    last_block, last_splice, last_encrypt= block, splice, encrypt
+                    #hosts = list(cfg.hosts.ap.values())
+                    #restart_gridftp(cfg, hosts)
+                    time.sleep(cfg.sleep)
+                logging.info("GTR: Recording the Gridftp configuration")
+                gridftp_report(cfg, output_dir)
+                #time.sleep(cfg.sleep)
+
+                start_port = cfg.encrypt_port if encrypt else cfg.tunnel_port
+                run_iperf_gst(
+                    #cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    parallel=parallel, arg=arg, files=files, start_port=start_port,
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir,
+                    encrypt=encrypt
+                )
+                #time.sleep(cfg.sleep)
+
+            if "ibase" in cfg.app:
+                test_idx += 1
+                start_port = cfg.direct_port
+                run_iperf_base(
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    parallel=parallel, arg=arg, files=files, start_port=start_port,
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir, encrypt=encrypt
+                )
+                #time.sleep(cfg.sleep)
+
+
+            if "rsync" in cfg.app and cfg.test == "transfer":
+                test_idx += 1
+                if block != last_block or splice != last_splice or encrypt != last_encrypt:
+                    logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
+                    gridftp_config(cfg, block, splice, encrypt, output_dir)
+                    last_block, last_splice, last_encrypt= block, splice, encrypt
+                    time.sleep(cfg.sleep)
+                logging.info("GTR: Recording the Gridftp configuration")
+                gridftp_report(cfg, output_dir)
+                
+                run_rsync_gst(
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    parallel=parallel, arg=arg, files=files, rsync_port=cfg.rsync_port,
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir, encrypt=encrypt,
+                )
+
+
+            if "rbase" in cfg.app and cfg.test == "transfer":
+                test_idx += 1
+                rsync_port = cfg.rsync_port
+                run_rsync_base(
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    parallel=parallel, arg=arg, files=files, rsync_port=rsync_port,
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir, encrypt=encrypt,
+                )
+                #time.sleep(cfg.sleep)
+
+            if "gtr" in cfg.app and cfg.test == "transfer":
+                test_idx += 1
+                logging_gridftp(cfg, output_dir)
+                logging.info("GTR: Changing the Gridftp log path")
+                #restart_gridftp(cfg)
+                #time.sleep(cfg.sleep)
+                
+                run_globus_transfer(
+                    # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    parallel=parallel, arg=arg, files=files,
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir, encrypt=encrypt,
+                )
+                #time.sleep(cfg.sleep)
+
+            if "mini" in cfg.app and cfg.test == "stream":
+                test_idx += 1
+                start_port = cfg.mini_port
+                run_mini_gst(
+                    cfg,
+                    idx=test_idx,
+                    #total_runs=total_runs,
+                    total_runs=total_tests,
+                    timeout=timeout,
+                    tomo_file=cfg.tomo_file,
+                    parallel=parallel,
+                    arg=arg,
+                    start_port=start_port,
+                    listener_host=cfg.hosts.ep["listener"],
+                    initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa,
+                    output_dir=output_dir,
+                    encrypt=encrypt,
+                )
+                
+            if "mbase" in cfg.app and cfg.test == "stream":
+                test_idx += 1
+                start_port = cfg.mini_port
+                run_mini_base(
+                    cfg,
+                    idx=test_idx,
+                    #total_runs=total_runs,
+                    total_runs=total_tests,
+                    timeout=timeout,
+                    tomo_file=cfg.tomo_file,
+                    parallel=parallel,
+                    arg=arg,
+                    start_port=start_port,
+                    listener_host=cfg.hosts.ep["listener"],
+                    initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa,
+                    output_dir=output_dir,
+                    encrypt=encrypt,
+                )
+
+            time.sleep(cfg.sleep)
+
+        except Exception as exc:
+            logging.exception(
+                "EXPERIMENT: Configuration failed: %s",
+                context,
             )
-            output_dir = str(output_path)
-        timeout = (arg * 120)
+            raise RuntimeError(
+                f"Experiment configuration failed: {context}: {exc}"
+            ) from exc
 
-        if "iperf" in cfg.app:
-            test_idx += 1
-            if block != last_block or splice != last_splice or encrypt != last_encrypt:
-                logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
-                gridftp_config(cfg, block, splice, encrypt, output_dir)
-                last_block, last_splice, last_encrypt= block, splice, encrypt
-                #hosts = list(cfg.hosts.ap.values())
-                #restart_gridftp(cfg, hosts)
-                time.sleep(cfg.sleep)
-            logging.info("GTR: Recording the Gridftp configuration")
-            gridftp_report(cfg, output_dir)
-            #time.sleep(cfg.sleep)
-
-            run_iperf_gst(
-                #cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
-                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                parallel=parallel, arg=arg, files=files, start_port=cfg.tunnel_port,
-                listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa, output_dir=output_dir,
-                encrypt=encrypt
-            )
-            #time.sleep(cfg.sleep)
-
-        if "ibase" in cfg.app:
-            test_idx += 1
-            run_iperf_base(
-                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                parallel=parallel, arg=arg, files=files, start_port=cfg.direct_port,
-                listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa, output_dir=output_dir, encrypt=encrypt
-            )
-            #time.sleep(cfg.sleep)
-
-
-        if "rsync" in cfg.app and cfg.test == "transfer":
-            test_idx += 1
-            if block != last_block or splice != last_splice or encrypt != last_encrypt:
-                logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
-                gridftp_config(cfg, block, splice, encrypt, output_dir)
-                last_block, last_splice, last_encrypt= block, splice, encrypt
-                time.sleep(cfg.sleep)
-            logging.info("GTR: Recording the Gridftp configuration")
-            gridftp_report(cfg, output_dir)
-            
-            run_rsync_gst(
-                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                parallel=parallel, arg=arg, files=files, rsync_port=cfg.rsync_port,
-                listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa, output_dir=output_dir, encrypt=encrypt,
-            )
-
-
-        if "rbase" in cfg.app and cfg.test == "transfer":
-            test_idx += 1
-            run_rsync_base(
-                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                parallel=parallel, arg=arg, files=files, rsync_port=cfg.rsync_port,
-                listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa, output_dir=output_dir, encrypt=encrypt,
-            )
-            #time.sleep(cfg.sleep)
-
-        if "gtr" in cfg.app and cfg.test == "transfer":
-            test_idx += 1
-            logging_gridftp(cfg, output_dir)
-            logging.info("GTR: Changing the Gridftp log path")
-            #restart_gridftp(cfg)
-            #time.sleep(cfg.sleep)
-            
-            run_globus_transfer(
-                # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
-                cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                parallel=parallel, arg=arg, files=files,
-                listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa, output_dir=output_dir, encrypt=encrypt,
-            )
-            #time.sleep(cfg.sleep)
-
-        if "mini" in cfg.app and cfg.test == "stream":
-            test_idx += 1
-            run_mini_gst(
-                cfg,
-                idx=test_idx,
-                #total_runs=total_runs,
-                total_runs=total_tests,
-                timeout=timeout,
-                tomo_file=cfg.tomo_file,
-                parallel=parallel,
-                arg=arg,
-                start_port=cfg.mini_port,
-                listener_host=cfg.hosts.ep["listener"],
-                initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa,
-                output_dir=output_dir,
-                encrypt=encrypt,
-            )
-            
-        if "mbase" in cfg.app and cfg.test == "stream":
-            test_idx += 1
-            run_mini_base(
-                cfg,
-                idx=test_idx,
-                #total_runs=total_runs,
-                total_runs=total_tests,
-                timeout=timeout,
-                tomo_file=cfg.tomo_file,
-                parallel=parallel,
-                arg=arg,
-                start_port=cfg.mini_port,
-                listener_host=cfg.hosts.ep["listener"],
-                initiator_host=cfg.hosts.ep["initiator"],
-                numa=numa,
-                output_dir=output_dir,
-                encrypt=encrypt,
-            )
-
-        time.sleep(cfg.sleep)
-
+        finally:
+            if created_files:
+                try:
+                    cleanup_file(cfg)
+                except Exception:
+                    logging.exception(
+                        "EXPERIMENT: File cleanup failed: %s",
+                        context,
+                    )

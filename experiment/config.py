@@ -231,7 +231,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--encrypt", action="store_true", help="Encryption is tested with splice disabled")
     parser.add_argument("--splice", type=_parse_int_list, default=[0])
     parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])
-    parser.add_argument("--time", "-t", type=_parse_int_list, default=[10])
+    parser.add_argument("--time", "-t", type=_parse_int_list, default=[15])
     parser.add_argument("--size", "-n", type=_parse_int_list, default=[1])
     parser.add_argument("--blocks", "-b", type=_parse_int_list, default=[32])
     parser.add_argument("--run", "-r", type=int, default=1)
@@ -245,7 +245,7 @@ def parse_args() -> argparse.Namespace:
 def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
 
     #is_stream = args.test == "stream"
-    # is_stream = test_mode == "stream"
+    is_stream = test_mode == "stream"
     
     default_devs = _default_interfaces_for_lease(args.lease)
     default_ips = _default_ips_for_lease(args.lease)
@@ -312,10 +312,10 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         splice=args.splice,
         #splice=bool(args.splice),
         parallels=args.parallel,
-        # time_frames=args.time if is_stream else [],
-        # file_sizes=args.size if not is_stream else [],
-        time_frames=args.time,
-        file_sizes=args.size,
+        time_frames=args.time if is_stream else [],
+        file_sizes=args.size if not is_stream else [],
+        # time_frames=args.time,
+        # file_sizes=args.size,
         blocks=args.blocks,
         run_num=args.run,
 

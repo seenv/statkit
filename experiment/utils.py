@@ -21,13 +21,13 @@ from remote import run_subprocess, popen_subprocess
 
 # Helpers:
 #-------------------------------------------------------------------------------
-def setup_logging(verbose: bool, log_path: str = "/tmp/strefer.log") -> None:
+def setup_logging(verbose: bool, log_path: str = "/tmp/statkit.log") -> None:
     root = logging.getLogger()
     # removing existing handlers to avoid duplicate logs when re running
     # root.handlers.clear()
     for h in list(root.handlers):
         root.removeHandler(h)
-
+        #h.close()
     root.setLevel(logging.DEBUG)
     fmt = logging.Formatter(
         #"%(asctime)s %(levelname)s %(message)s",
@@ -37,12 +37,13 @@ def setup_logging(verbose: bool, log_path: str = "/tmp/strefer.log") -> None:
     # always INFO in the console
     sh = logging.StreamHandler()
     sh.setFormatter(fmt)
+    #sh.setLevel(logging.DEBUG if verbose else logging.INFO)
     sh.setLevel(logging.INFO)
     root.addHandler(sh)
     # DEBUG in file when verbose
     #if verbose:
     Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-    fh = logging.FileHandler(log_path)
+    fh = logging.FileHandler(log_path)#, mode="a", encoding="utf-8")
     fh.setFormatter(fmt)
     fh.setLevel(logging.DEBUG)
     root.addHandler(fh)

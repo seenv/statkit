@@ -83,9 +83,13 @@ def start_globus_transfer(
         f"globus transfer -v  {files_list} --label {shlex.quote(label)} {extra_arg} "
         f"--no-verify-checksum --fail-on-quota-errors --format unix --jmespath task_id --notify off "
         f"> {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt && "
+        
         f"TASK_ID=$(cat {shlex.quote(out_dir)}/{shlex.quote(app)}_task_id.txt | tr -d '\"[:space:]') && "
+        
         f"globus task wait \"$TASK_ID\" 2>&1 | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}.log && "
+        
         f"globus task show -vvv \"$TASK_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}_task_show.log && "
+        
         f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
         f"}} 2>&1 | tr '\\r' '\\n' "
         f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
@@ -95,3 +99,52 @@ def start_globus_transfer(
     )
 
     logging.debug("GTR: Completed Globus transfer of %d files %s", parallel, cp.stdout)
+
+
+def start_globus_transfer_multiple(
+    cfg: Config, src_cid: str, dst_cid: str, label: str, 
+    # contact_port: int, 
+    parallel: int, 
+    size: int, encr: int, files: list[str], app: str, out_dir: str,  timeout: int,
+    # module_name: str = "transfer", module_path: str = "/tmp/temp_files", 
+    check: bool = True,
+) -> None:
+    extra_arg = f"--encrypt" if encr == 1 else ""
+    size_bytes = parse_size_to_bytes(size)
+    processes = []
+    for i, file_name in enumerate(files):
+        transfer_label = f"{label}-file{i}"
+        cp = popen_subprocess(
+            cfg.localhost, None,
+            f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+            f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
+            f"/usr/bin/time -vvv "
+            f"-o {shlex.quote(out_dir)}/{shlex.quote(app)}{i}-time.log "
+            f"globus transfer -v "
+            f"{shlex.quote(src_cid)}:{shlex.quote(file_name)} "
+            f"{shlex.quote(dst_cid)}:{shlex.quote(file_name)} "
+            f"--label {shlex.quote(transfer_label)} {extra_arg} "
+            f"--no-verify-checksum --fail-on-quota-errors --format unix --jmespath task_id --notify off "
+            f"> {shlex.quote(out_dir)}/{shlex.quote(app)}{i}_task_id.txt && "
+
+            f"TASK_ID=$(cat {shlex.quote(out_dir)}/{shlex.quote(app)}{i}_task_id.txt | tr -d '\"[:space:]') && "
+
+            f"globus task wait \"$TASK_ID\" 2>&1 | tee -a {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.log && "
+
+            f"globus task show -vvv \"$TASK_ID\" > {shlex.quote(out_dir)}/{shlex.quote(app)}{i}_task_show.log && "
+
+            f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
+            f"}} 2>&1 | tr '\\r' '\\n' "
+            f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
+            f"| tee {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.log",
+            localhost=cfg.localhost,
+        )
+        processes.append(cp)
+
+    for i, cp in enumerate(processes):
+        stdout, stderr = cp.communicate()
+
+        if cp.returncode != 0:
+            logging.error("GTR: Globus transfer submission %d failed: %s", i, stderr)
+
+        logging.debug("GTR: Completed Globus transfer submission %d for file %s %s", i, files[i], stdout)

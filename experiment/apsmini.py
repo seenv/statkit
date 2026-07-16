@@ -86,15 +86,23 @@ def _get_container_stats(
 
 def _are_containers_running(cfg, host, parallel, service, timeout, retries):
     total_containers = parallel * 2 if host == cfg.hosts.ep["initiator"] and service == "sirt" else parallel
+    # for retry in range(1, retries + 1):
+    #     status = _get_container_stats(cfg, host, timeout)
+    #     if status != total_containers and retry < retries:
+    #         time.sleep(cfg.sleep)
+    #     elif status != total_containers and retry == retries:
+    #         raise RuntimeError(f"MINI: {service.upper()} containers didn't start after {retries * cfg.sleep} seconds on {host.capitalize()}")
+    #     elif status == total_containers and retry < retries:
+    #         logging.debug("MINI: Started %dx %s container on the %s", status, service.upper(), host.upper())
+    #         break
     for retry in range(1, retries + 1):
         status = _get_container_stats(cfg, host, timeout)
-        if status != total_containers and retry < retries:
+        if status == total_containers:
+            logging.debug("MINI: Started %dx %s container on %s", status, service.upper(), host.upper())
+            return
+        if retry < retries:
             time.sleep(cfg.sleep)
-        elif status != total_containers and retry == retries:
-            raise RuntimeError(f"MINI: {service.upper()} containers didn't start after {retries * cfg.sleep} seconds on {host.capitalize()}")
-        elif status == total_containers and retry < retries:
-            logging.debug("MINI: Started %dx %s container on the %s", status, service.upper(), host.upper())
-            break
+    raise RuntimeError(f"MINI: {service.upper()} containers didn't start after {retries * cfg.sleep} seconds on {host.capitalize()}")
 
 
 def _start_mini_service(
@@ -120,15 +128,15 @@ def _start_mini_service(
     launch_processes = []
     #for i, (tunnel_port, tunnel_id) in enumerate(zip(tunnel_ports, tunnel_ids)):
     for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
-        # wrapper_cmd = f"globus-streams-launch -p {start_port + i} {stream_id}  " if service == "daq" else f"globus-streams-launch {stream_id} "STD
+        # wrapper_cmd = f"globus-streams-launch -p {start_port + (i * 2)} {stream_id}  " if service == "daq" else f"globus-streams-launch {stream_id} "STD
         if app == "mini_base":
             wrapper_cmd = ""
         else:
-            wrapper_cmd = f"globus-streams-launch -p {start_port + i} {stream_id}  " if service == "daq" else f"globus-streams-launch {stream_id} "
+            wrapper_cmd = f"globus-streams-launch -p {start_port + (i * 2)} {stream_id}  " if service == "daq" else f"globus-streams-launch {stream_id} "
 
         if service == "daq":
-            # cmd = _daq_service(start_port + i, file, i)
-            cmd = _daq_service(start_port + i, file, i)
+            # cmd = _daq_service(start_port + (i * 2), file, i)
+            cmd = _daq_service(start_port + (i * 2), file, i)
         elif service == "dist":
             # cmd = _dist_service(initiator_gw_ip, tunnel_port, i)
             cmd = _dist_service(listener_ip, listen_port, i)
