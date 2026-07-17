@@ -38,7 +38,7 @@ def run_iperf_gst(
     start_port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int,
 ) -> None:
-    print("\n")
+    logging.info("")
     logging.info("----- Tests: %d / %d ------- Strarting iPerf3 Tunnel Tests", idx, total_runs)
     stream_ids, listen_ports = [], []
     ids = get_stream_id(cfg)
@@ -139,7 +139,7 @@ def run_iperf_base(
     encrypt: int,
 ) -> None:
     
-    print("\n")
+    logging.info("")
     logging.info("----- Test %d / %d: Starting iPerf3 Direct Tests -----", idx, total_runs)
     stream_ids, listen_ports = [], []
     listen_ip = cfg.listener_pub
@@ -187,7 +187,7 @@ def run_rsync_gst(
     listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int,
 ) -> None:
-    print("\n")
+    logging.info("")
     logging.info("----- Test %d / %d: Starting RSync GST Test -----", idx, total_runs)
     stream_ids, listen_ports = [], []
     ids = get_stream_id(cfg)
@@ -273,7 +273,7 @@ def run_rsync_base(
     encrypt: int
 ) -> None:
 
-    print("\n")
+    logging.info("")
     logging.info("----- Test %d / %d: Starting RSync Direct Test -----", idx, total_runs)
     stream_ids, listen_ports = [], []
     listen_ip = cfg.listener_pub
@@ -333,7 +333,7 @@ def run_globus_transfer(
     listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int
 ) -> None:
-    print("\n")
+    logging.info("")
     logging.info("----- Tests: %d / %d ------- Strarting Globus Transfer Tests", idx, total_runs)
     ids = get_collection_id(cfg)
     initiator_collection_id, listener_collection_id = ids["initiator"], ids["listener"]
@@ -383,7 +383,7 @@ def run_mini_gst(
     #listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int,
 ) -> None:
-    print("\n")
+    logging.info("")
     logging.info("----- Test %d / %d: Starting APS mini app GST Test -----", idx, total_runs)
     #tunnel_ids, tunnel_ports = [], []
     #init_gw_ip = None
@@ -474,7 +474,7 @@ def run_mini_base(
     #listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int,
 ) -> None:
-    print("\n")
+    logging.info("")
     logging.info("----- Test %d / %d: Starting APS mini app GST Test -----", idx, total_runs)
     stream_ids, listen_ports = [], []
     listen_ip = cfg.listener_pub
@@ -532,14 +532,7 @@ def experiment_main(cfg: Config) -> None:
     )
 
     last_block, last_splice, last_encrypt = None, None, None
-    total_runs = (
-        len(numactl)
-        * len(blocks)
-        * len(parallels)
-        * len(args)
-        * len(net_modes)
-        * runs
-    )
+    total_runs = (len(numactl) * len(blocks) * len(parallels) * len(args) * len(net_modes) * runs)
     test_apps = ["iperf", "ibase", "mini", "mbase"] if cfg.test == "stream" else ["iperf", "ibase", "rsync", "rbase", "gtr"]
     total_tests = total_runs * len(cfg.test)
     for idx, (numa, block, parallel, arg, splice, encrypt, run) in enumerate(test_config, start=1):
@@ -551,7 +544,7 @@ def experiment_main(cfg: Config) -> None:
             f"arg={arg}, splice={splice}, encrypt={encrypt}, run={run}"
         )
         try:
-            print("\n")
+            logging.info("")
             logging.info(
                 "--------------- Config: %d:%d / %d : NUMA %s / blocksize %s / arg %s / splice %s / encrypt %s / run %s / parallel %s ---------------",
                 idx, idx * len(test_apps), total_tests, numa, block, arg, splice, encrypt, run, parallel
@@ -713,12 +706,12 @@ def experiment_main(cfg: Config) -> None:
                 f"Experiment configuration failed: {context}: {exc}"
             ) from exc
 
-        finally:
-            if created_files:
-                try:
-                    cleanup_file(cfg)
-                except Exception:
-                    logging.exception(
-                        "EXPERIMENT: File cleanup failed: %s",
-                        context,
-                    )
+        # finally:
+        #     if created_files:
+        #         try:
+        #             cleanup_file(cfg)
+        #         except Exception:
+        #             logging.exception(
+        #                 "EXPERIMENT: File cleanup failed: %s",
+        #                 context,
+        #             )

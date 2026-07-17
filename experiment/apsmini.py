@@ -102,7 +102,7 @@ def _are_containers_running(cfg, host, parallel, service, timeout, retries):
             return
         if retry < retries:
             time.sleep(cfg.sleep)
-    raise RuntimeError(f"MINI: {service.upper()} containers didn't start after {retries * cfg.sleep} seconds on {host.capitalize()}")
+    raise RuntimeError(f"MINI: Running containers: {status} | {service.upper()} containers didn't start after {retries * cfg.sleep} seconds on {host.capitalize()}")
 
 
 def _start_mini_service(
