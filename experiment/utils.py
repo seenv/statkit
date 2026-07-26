@@ -318,7 +318,8 @@ def restart_gridftp(cfg: Config, hosts: list[str], check: bool = True) -> None:
     # for host in cfg.hosts.ap.values():
         cp = run_subprocess(
             host, None,
-            "sudo systemctl restart apache2.service ",
+            f"sudo systemctl restart globus-gridftp-server.service && "
+            f"sudo systemctl restart apache2.service ",
             #"sudo systemctl restart apache2.service && "
             #"sudo systemctl restart gcs_manager.service && "
             #"sudo systemctl restart gcs_manager_assistant.service && "
@@ -388,14 +389,14 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
         cp = run_subprocess(host, None, "gcs stream-gateway list \n", localhost=cfg.localhost)
         if check and cp.returncode != 0:
             raise RuntimeError(
-                f"IPERF: Failed getting the stream id on {host.upper()}\n"
+                f"GST: Failed getting the stream id on {host.upper()}\n"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
-        out[role] = _parse_gateway_id(cp.stdout + "\n" + cp.stderr, [cfg.lease, role.capitalize()], exact=False)
-        logging.debug("IPERF: Stream Gateway id on %s %s", host.upper(), cp.stdout.strip())
+        out[role] = _parse_gateway_id(cp.stdout + "\n" + cp.stderr, [cfg.lease.capitalize(), role.capitalize()], exact=False)
+        logging.debug("GST: Stream Gateway id on %s %s", host.upper(), cp.stdout.strip())
     missing = {"initiator", "listener"} - set(out.keys())
     if missing:
-        raise RuntimeError(f"Missing stream ids for roles: {sorted(missing)}")
+        raise RuntimeError(f"GST: Missing stream ids for roles: {sorted(missing)}")
     return out
 
 
@@ -403,7 +404,7 @@ def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, lbl: str, tim
     cp = run_subprocess(
         cfg.localhost, cfg.local_env,
         "globus streams tunnel create "
-        "--lifetime-minutes 360 -v "
+        "--lifetime-minutes 3600 -v "
         f"--label {shlex.quote(lbl)} "
         f"{shlex.quote(initiator_id)} {shlex.quote(listener_id)} ",
         localhost=cfg.localhost,
@@ -967,7 +968,7 @@ def extract_connector_contact_string(conf_text: str) -> tuple[str, int]:
 #                 f"GTR: Failed getting the collection id on {host.upper()}\n"
 #                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
 #             )
-#         out[role] = parse_collection_uid(cp.stdout + "\n" + cp.stderr, [cfg.lease, role.capitalize()], exact=False)
+#         out[role] = parse_collection_uid(cp.stdout + "\n" + cp.stderr, [cfg.lease.capitalize(), role.capitalize()], exact=False)
 #         logging.debug("GTR: Collection id on %s %s", host.upper(), cp.stdout.strip())
 #     missing = {"initiator", "listener"} - set(out.keys())
 #     if missing:

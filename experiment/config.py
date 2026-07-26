@@ -23,13 +23,11 @@ def _parse_int_list(s: str) -> list[int]:
         raise argparse.ArgumentTypeError("Integer list cannot be empty")
     return values
 
-
 def _parse_str_list(s: str) -> list[str]:
     values = [x.strip() for x in s.split(",") if x.strip()]
     if not values:
         raise argparse.ArgumentTypeError("String list cannot be empty")
     return values
-
 
 def _parse_test_list(s: str) -> list[TestMode]:
     valid_tests = {"stream", "transfer"}
@@ -44,7 +42,6 @@ def _parse_test_list(s: str) -> list[TestMode]:
 
     return [cast(TestMode, test) for test in tests]
 
-
 def _parse_app_list(s: str) -> list[str]:
     valid_apps = {"iperf", "ibase", "rsync", "rbase", "gtr", "mini", "mbase"}
     apps = _parse_str_list(s)
@@ -56,7 +53,6 @@ def _parse_app_list(s: str) -> list[str]:
         )
     return apps
 
-
 def _parse_numa_list(s: str) -> list[str]:
     valid_numas = {"numa", "no-numa"}
     numas = _parse_str_list(s)
@@ -67,6 +63,26 @@ def _parse_numa_list(s: str) -> list[str]:
             f"Valid choices: {', '.join(sorted(valid_numas))}"
         )
     return numas
+
+def _default_hosts_for_lease(lease: str) -> dict[str, str]:
+    if lease.lower() == "chameleon":
+        return {
+            "initiator_ap": "chi-c2cs",
+            "listener_ap": "chi-p2cs",
+            "initiator_ep": "chi-cons",
+            "listener_ep": "chi-prod",
+        }
+
+    return {
+        "initiator_ap"  : "mfab-c2cs",
+        "listener_ap"   : "mfab-p2cs",
+        "initiator_ep"  : "mfab-cons",
+        "listener_ep"   : "mfab-prod",
+    }
+
+    # raise ValueError(
+    #     f"Unsupported lease {lease!r}. Expected 'fabric' or 'chameleon'"
+    # )
 
 def _default_ips_for_lease(lease: str) -> dict[str, str]:
     if lease.lower() == "chameleon":
@@ -103,8 +119,8 @@ def _default_interfaces_for_lease(
     return {
         "initiator_ap": ["enp7s0np0", "enp8s0np1"],
         "listener_ap": ["enp7s0np0", "enp8s0np1"],
-        "initiator_ep": ["enp8s0"],
-        "listener_ep": ["enp8s0"],
+        "initiator_ep": ["enp7s0", "enp8s0"],
+        "listener_ep": ["enp7s0", "enp8s0"],
     }
 
 def _build_interface_map(
@@ -144,16 +160,16 @@ class Config:
     is_test: bool
     lease: str
     test: TestMode
-    
+
     numactl: Sequence[str]
     tcp_buffer: str
     ring_buffer: str
 
     localhost: str
     hosts: Hosts
-    
+
     interfaces: Mapping[str, Sequence[str]]
-    
+
     listener_ip: str
     listener_pub: str
     initiator_ip: str
@@ -188,8 +204,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run stream or transfer experiments.")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--is-test", action="store_true")
-    parser.add_argument("--lease", required=True, help="Lease name on the testbed")
-    #parser.add_argument("--test", required=True, choices=["stream", "transfer"], help="Experiment/test to perform")
+    parser.add_argument("--lease", type=str.lower, required=True, choices=["fabric", "chameleon"], help="Lease name on the testbed")
     parser.add_argument("--test", type=_parse_test_list, required=True, help="Comma-separated test modes: stream,transfer")
     parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
 
@@ -197,10 +212,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tcp-buffer", type=str, required=True)#, help="Experimetns with numa tunning enabled")
     parser.add_argument("--ring-buffer", type=str, required=True)#, help="Experimetns with numa tunning enabled")
 
-    parser.add_argument("--initiator-ap", type=str, default="chi-trans-consap")
-    parser.add_argument("--listener-ap", default="chi-trans-prodap")
-    parser.add_argument("--initiator-ep", default="chi-trans-consep")
-    parser.add_argument("--listener-ep", default="chi-trans-prodep")
+    # parser.add_argument("--initiator-ap", default="chi-c2cs")
+    # parser.add_argument("--listener-ap", default="chi-p2cs")
+    # parser.add_argument("--initiator-ep", default="chi-cons")
+    # parser.add_argument("--listener-ep", default="chi-prod")
+    parser.add_argument("--initiator-ap", type=str, default=None, help="Initiator access-point host; defaults according to --lease")
+    parser.add_argument("--listener-ap", type=str, default=None, help="Listener access-point host; defaults according to --lease")
+    parser.add_argument("--initiator-ep", type=str, default=None, help="Initiator endpoint host; defaults according to --lease")
+    parser.add_argument("--listener-ep", type=str, default=None, help="Listener endpoint host; defaults according to --lease")
 
     parser.add_argument("--initiator-ap-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the initiator access point")
     parser.add_argument( "--listener-ap-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the listener access point")
@@ -224,7 +243,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mbase-port", type=int, default=50075)
     parser.add_argument("--tomo-file", type=str, default="tomo_00058_all_subsampled1p_s1079s1081.h5")
     # parser.add_argument("--tomo-file", type=str, default="tomo_00058.h5")
-    
+
     parser.add_argument("--sleep", type=int, default=5)
 
     parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,rsync,rbase,gtr,mini,mbase")
@@ -235,25 +254,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--size", "-n", type=_parse_int_list, default=[1])
     parser.add_argument("--blocks", "-b", type=_parse_int_list, default=[32])
     parser.add_argument("--run", "-r", type=int, default=1)
-        
+
     parser.add_argument("--output", "-o", default="/tmp/")
 
     return parser.parse_args()
 
 
-#def build_config(args: argparse.Namespace) -> Config:
 def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
 
-    #is_stream = args.test == "stream"
     is_stream = test_mode == "stream"
-    
+
+    default_hosts = _default_hosts_for_lease(args.lease)
     default_devs = _default_interfaces_for_lease(args.lease)
     default_ips = _default_ips_for_lease(args.lease)
-    
+
+    args.initiator_ap = args.initiator_ap if args.initiator_ap is not None else default_hosts["initiator_ap"]
+    args.listener_ap = args.listener_ap if args.listener_ap is not None else default_hosts["listener_ap"]
+    args.initiator_ep = args.initiator_ep if args.initiator_ep is not None else default_hosts["initiator_ep"]
+    args.listener_ep = args.listener_ep if args.listener_ep is not None else default_hosts["listener_ep"]
+
     args.initiator_ap_devs = (args.initiator_ap_devs if args.initiator_ap_devs is not None else default_devs["initiator_ap"])
     args.listener_ap_devs = (args.listener_ap_devs if args.listener_ap_devs is not None else default_devs["listener_ap"])
     args.initiator_ep_devs = (args.initiator_ep_devs if args.initiator_ep_devs is not None else default_devs["initiator_ep"])
     args.listener_ep_devs = (args.listener_ep_devs if args.listener_ep_devs is not None else default_devs["listener_ep"])
+
     listener_ip = (args.listener_ip if args.listener_ip is not None else default_ips["listener_ip"])
     listener_pub = (args.listener_pub if args.listener_pub is not None else default_ips["listener_pub"])
     initiator_ip = (args.initiator_ip if args.initiator_ip is not None else default_ips["initiator_ip"])
@@ -269,7 +293,7 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         lease=args.lease,
         #test=cast(TestMode, args.test),
         test=test_mode,
-        
+
         numactl=args.numactl,
         tcp_buffer=args.tcp_buffer,
         ring_buffer=args.ring_buffer,
@@ -285,9 +309,9 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
                 "listener": args.listener_ep,
             },
         ),
-        
+
         interfaces=_build_interface_map(args),
-        
+
         # listener_ip=args.listener_ip,
         # listener_pub=args.listener_pub,
         # initiator_ip=args.initiator_ip,
@@ -304,9 +328,9 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         mini_port=args.mini_port,
         mbase_port=args.mbase_port,
         tomo_file=args.tomo_file,
-        
+
         sleep=args.sleep,
-        
+
         app=args.app,
         encrypt=bool(args.encrypt),
         splice=args.splice,

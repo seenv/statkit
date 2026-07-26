@@ -9,7 +9,7 @@ from typing import Optional
 
 # run subprocess via ssh
 def _ssh_base(host: str) -> list[str]:
-    return ["ssh", host, "bash", "-lc"]
+    return ["ssh", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=10", "-o", "ControlMaster=no", "-o", "TCPKeepAlive=yes", host, "bash", "-lc"]
 
 
 def is_ssh_failure(cp: subprocess.CompletedProcess[str]) -> bool:
@@ -90,5 +90,6 @@ def popen_subprocess(host: str, env: Optional[str], cmd: str, *, localhost: str)
     argv = _build_argv(host, env, cmd,  localhost=localhost)
     logging.debug("POPEN: %s", argv)
     return subprocess.Popen(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    #make it stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, for server processes with no communicate
 
 

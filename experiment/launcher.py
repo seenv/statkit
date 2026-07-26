@@ -533,8 +533,29 @@ def experiment_main(cfg: Config) -> None:
 
     last_block, last_splice, last_encrypt = None, None, None
     total_runs = (len(numactl) * len(blocks) * len(parallels) * len(args) * len(net_modes) * runs)
-    test_apps = ["iperf", "ibase", "mini", "mbase"] if cfg.test == "stream" else ["iperf", "ibase", "rsync", "rbase", "gtr"]
-    total_tests = total_runs * len(cfg.test)
+
+    # test_apps = ["iperf", "ibase", "mini", "mbase"] if cfg.test == "stream" else ["iperf", "ibase", "rsync", "rbase", "gtr"]
+    tests_per_config = sum(
+        (
+            "iperf" in cfg.app,
+            "ibase" in cfg.app,
+            "rsync" in cfg.app and cfg.test == "transfer",
+            "rbase" in cfg.app and cfg.test == "transfer",
+            "gtr" in cfg.app and cfg.test == "transfer",
+            "mini" in cfg.app and cfg.test == "stream",
+            "mbase" in cfg.app and cfg.test == "stream",
+        )
+    )
+
+    if tests_per_config == 0:
+        raise ValueError(
+            f"No applications can run for test mode {cfg.test!r}. "
+            f"Selected applications: {list(cfg.app)}"
+        )
+
+    # total_tests = total_runs * len(cfg.test)
+    total_tests = total_runs * tests_per_config
+
     for idx, (numa, block, parallel, arg, splice, encrypt, run) in enumerate(test_config, start=1):
         created_files = False
         mode_dir = net_mode_dir(splice, encrypt)
@@ -545,11 +566,18 @@ def experiment_main(cfg: Config) -> None:
         )
         try:
             logging.info("")
+            # logging.info(
+            #     "--------------- Config: %d:%d / %d : NUMA %s / blocksize %s / parallel %s / arg %s / splice %s / encrypt %s / run %s ---------------",
+            #     idx, idx * len(test_apps), total_tests, numa, block, arg, splice, encrypt, run, parallel
+            # )
             logging.info(
-                "--------------- Config: %d:%d / %d : NUMA %s / blocksize %s / arg %s / splice %s / encrypt %s / run %s / parallel %s ---------------",
-                idx, idx * len(test_apps), total_tests, numa, block, arg, splice, encrypt, run, parallel
+                "--------------- Config: %d:%d / %d : NUMA %s / blocksize %s / parallel %s / arg %s / splice %s / encrypt %s / run %s ---------------",
+                idx, idx * tests_per_config, total_tests, numa, block, parallel, arg, splice, encrypt, run, 
             )
-            test_idx, files = 0, []
+
+            # test_idx, files = 0, []
+            test_idx, files = ((idx - 1) * tests_per_config), []
+
             if idx == 1 and (not(cfg.is_test)):
                 logging.info("SYS: Recording the system reports")
                 sys_dir = (Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
@@ -572,7 +600,8 @@ def experiment_main(cfg: Config) -> None:
                     Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / f"B{block}" / f"P{parallel}" / f"T{arg}" / mode_dir / f"R{run}"
                 )
                 output_dir = str(output_path)
-            timeout = (arg * 120)
+
+            timeout = (arg * 120) * 10
 
             if "iperf" in cfg.app:
                 test_idx += 1
@@ -580,8 +609,10 @@ def experiment_main(cfg: Config) -> None:
                     logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
                     gridftp_config(cfg, block, splice, encrypt, output_dir)
                     last_block, last_splice, last_encrypt= block, splice, encrypt
+                    #time.sleep(15)
                     #hosts = list(cfg.hosts.ap.values())
-                    #restart_gridftp(cfg, hosts)
+                    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+                    restart_gridftp(cfg, hosts)
                     time.sleep(cfg.sleep)
                 logging.info("GTR: Recording the Gridftp configuration")
                 gridftp_report(cfg, output_dir)
@@ -706,7 +737,8 @@ def experiment_main(cfg: Config) -> None:
                 f"Experiment configuration failed: {context}: {exc}"
             ) from exc
 
-        # finally:
+        finally:
+            idx = 1
         #     if created_files:
         #         try:
         #             cleanup_file(cfg)

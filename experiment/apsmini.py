@@ -8,7 +8,8 @@ from typing import Sequence
 from config import Config
 from remote import run_subprocess, popen_subprocess
 
-
+# f"--name daq-{i} "
+# f"-v $HOME/tomo_00058.h5:/mnt/tomo_00058.h5:ro "
 def _daq_service(port: int, file: str, i: int) -> str:
     return (
         f"docker run --rm --network host "

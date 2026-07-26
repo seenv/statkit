@@ -36,7 +36,7 @@ def get_collection_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
                 f"GTR: Failed getting the collection id on {host.upper()}\n"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
-        out[role] = parse_collection_uid(cp.stdout + "\n" + cp.stderr, [cfg.lease, role.capitalize()], exact=False)
+        out[role] = parse_collection_uid(cp.stdout + "\n" + cp.stderr, [cfg.lease.capitalize(), role.capitalize()], exact=False)
         logging.debug("GTR: Collection id on %s %s", host.upper(), cp.stdout.strip())
     missing = {"initiator", "listener"} - set(out.keys())
     if missing:

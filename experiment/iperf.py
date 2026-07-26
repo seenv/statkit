@@ -71,7 +71,7 @@ def start_iperf_client(
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
     
-    processes = []
+    processes, results = [], []
     duration, throughput, bytes_transferred, retransmissions = 0, 0, 0, 0
     size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
     chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
@@ -85,16 +85,22 @@ def start_iperf_client(
         cp = popen_subprocess(
             host, cfg.remote_env,
             f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            
+            f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
+            
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}{i}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
             "globus-streams-launch "
             f"{shlex.quote(stream_id)} "                                                    #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -c globus.{shlex.quote(stream_id)} -p {listen_port} "                 #f"iperf3 -c globus.{shlex.quote(tunnel_id)} -B {cfg.initiator_ip} -p {contact_port} "
-            #f"-Z -R -P {parallel} --timestamps --forceflush "
             f"-Z -R -P 1 --timestamps --forceflush "
             f"{extra_arg} "
-            # f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}.json && "
-            # f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}.json ",
-            f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
+            f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json ; "
+            
+            f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
+            f"}} 2>&1 | tr '\\r' '\\n' "
+            f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
+            f"| tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log; "
+            
             f"rc=$?; "
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
             f"exit $rc ",
@@ -102,15 +108,20 @@ def start_iperf_client(
             # timeout=timeout,
         )
         processes.append((cp, listen_port))
-
+    
     #time.sleep(arg + 10 + (cfg.sleep * 2))
+    # for cp, listen_port in processes:
+    #     stdout, stderr = cp.communicate()
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
-        if cp.returncode != 0:
-            logging.error("IGST: Process on port %s failed with return code %s: %s", listen_port, cp.returncode, stderr)
+        results.append((listen_port, stdout, stderr, cp.returncode))
+        # if cp.returncode != 0:
+        #     logging.error("IGST: Process on port %s failed with return code %s: %s", listen_port, cp.returncode, stderr)
 
-    time.sleep(cfg.sleep)
-    for cp, listen_port in processes:
+    #for cp, listen_port in processes:
+    for listen_port, stdout, stderr, returncode in results:
+        if returncode != 0:
+            logging.error("IBASE: Process on port %s failed with return code %s: %s", listen_port, returncode, stderr)
         tail = "\n".join(stdout.splitlines()[-29:-21])
         logging.debug("IGST: iPerf log on port %s of %s \n%s", listen_port, host.upper(), tail)
         seconds = float(re.search(r'"seconds":\s*([\d.]+)', tail).group(1))
@@ -196,7 +207,7 @@ def start_iperf_client_base(
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
 
-    processes = []
+    processes,results = [], []
     duration, throughput, bytes_transferred, retransmissions = 0, 0, 0, 0
     size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
     chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
@@ -222,11 +233,11 @@ def start_iperf_client_base(
 
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
-        if cp.returncode != 0:
-            logging.error("IGST: Process on port %s failed with return code %s: %s", listen_port, cp.returncode, stderr)
+        results.append((listen_port, stdout, stderr, cp.returncode))
             
-    time.sleep(cfg.sleep)
-    for cp, listen_port in processes:
+    for listen_port, stdout, stderr, returncode in results:
+        if returncode != 0:
+            logging.error("IBASE: Process on port %s failed with return code %s: %s", listen_port, returncode, stderr)
         #tail = "\n".join(stdout.splitlines()[-29:-21])
         #logging.info("IGST: iPerf3 log on %s %s", host.upper(), tail)
         #return cp
