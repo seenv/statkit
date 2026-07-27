@@ -212,10 +212,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tcp-buffer", type=str, required=True)#, help="Experimetns with numa tunning enabled")
     parser.add_argument("--ring-buffer", type=str, required=True)#, help="Experimetns with numa tunning enabled")
 
-    # parser.add_argument("--initiator-ap", default="chi-c2cs")
-    # parser.add_argument("--listener-ap", default="chi-p2cs")
-    # parser.add_argument("--initiator-ep", default="chi-cons")
-    # parser.add_argument("--listener-ep", default="chi-prod")
     parser.add_argument("--initiator-ap", type=str, default=None, help="Initiator access-point host; defaults according to --lease")
     parser.add_argument("--listener-ap", type=str, default=None, help="Listener access-point host; defaults according to --lease")
     parser.add_argument("--initiator-ep", type=str, default=None, help="Initiator endpoint host; defaults according to --lease")
@@ -226,29 +222,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initiator-ep-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the initiator endpoint")
     parser.add_argument("--listener-ep-devs", type=_parse_str_list, default=None, help="Comma-separated interfaces on the listener endpoint" )
 
-    # parser.add_argument("--listener-ip", default="192.168.110.10")
-    # parser.add_argument("--listener-pub", default="10.191.130.100")
-    # parser.add_argument("--initiator-ip", default="192.168.120.10")
-    # parser.add_argument("--initiator-pub", default="10.191.129.43")
     parser.add_argument("--listener-ip", default=None)
     parser.add_argument("--listener-pub", default=None)
     parser.add_argument("--initiator-ip", default=None)
     parser.add_argument("--initiator-pub", default=None)
 
-    parser.add_argument("--tunnel-port", type=int, default=50000)
-    parser.add_argument("--encrypt-port", type=int, default=50015)
-    parser.add_argument("--direct-port", type=int, default=50030)
-    parser.add_argument("--rsync-port", type=int, default=50045)
-    parser.add_argument("--mini-port", type=int, default=50060)
-    parser.add_argument("--mbase-port", type=int, default=50075)
-    parser.add_argument("--tomo-file", type=str, default="tomo_00058_all_subsampled1p_s1079s1081.h5")
-    # parser.add_argument("--tomo-file", type=str, default="tomo_00058.h5")
+    parser.add_argument("--tunnel-port", type=int, default=51000)
+    parser.add_argument("--encrypt-port", type=int, default=51015)
+    parser.add_argument("--direct-port", type=int, default=51030)
+    parser.add_argument("--rsync-port", type=int, default=51045)
+    parser.add_argument("--mini-port", type=int, default=51060)
+    parser.add_argument("--mbase-port", type=int, default=51075)
+    parser.add_argument("--tomo-file", type=str, default="tomo_00058_all_subsampled1p_s1079s1081.h5", choices=["tomo_00058_all_subsampled1p_s1079s1081.h5", "tomo_00058.h5"])
 
     parser.add_argument("--sleep", type=int, default=5)
 
     parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,rsync,rbase,gtr,mini,mbase")
-    parser.add_argument("--encrypt", action="store_true", help="Encryption is tested with splice disabled")
-    parser.add_argument("--splice", type=_parse_int_list, default=[0])
+    parser.add_argument("--encrypt", action="store_true", help="Enabling encryption and disabling the splice", default=[0])
+    parser.add_argument("--splice", type=_parse_int_list, help="Splice option, 0: disable, 1: enable")
     parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])
     parser.add_argument("--time", "-t", type=_parse_int_list, default=[15])
     parser.add_argument("--size", "-n", type=_parse_int_list, default=[1])
@@ -282,16 +273,11 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
     listener_pub = (args.listener_pub if args.listener_pub is not None else default_ips["listener_pub"])
     initiator_ip = (args.initiator_ip if args.initiator_ip is not None else default_ips["initiator_ip"])
     initiator_pub = (args.initiator_pub if args.initiator_pub is not None else default_ips["initiator_pub"])
-    # listener_ip = _use_default(args.listener_ip, default_ips["listener_ip"])
-    # listener_pub = _use_default(args.listener_pub, default_ips["listener_pub"])
-    # initiator_ip = _use_default(args.initiator_ip, default_ips["initiator_ip"])
-    # initiator_pub = _use_default(args.initiator_pub, default_ips["initiator_pub"])
 
     return Config(
         verbose=args.verbose,
         is_test=args.is_test,
         lease=args.lease,
-        #test=cast(TestMode, args.test),
         test=test_mode,
 
         numactl=args.numactl,
@@ -312,10 +298,6 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
 
         interfaces=_build_interface_map(args),
 
-        # listener_ip=args.listener_ip,
-        # listener_pub=args.listener_pub,
-        # initiator_ip=args.initiator_ip,
-        # initiator_pub=args.initiator_pub,
         listener_ip=listener_ip,
         listener_pub=listener_pub,
         initiator_ip=initiator_ip,
@@ -334,26 +316,18 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         app=args.app,
         encrypt=bool(args.encrypt),
         splice=args.splice,
-        #splice=bool(args.splice),
         parallels=args.parallel,
         time_frames=args.time if is_stream else [],
         file_sizes=args.size if not is_stream else [],
-        # time_frames=args.time,
-        # file_sizes=args.size,
         blocks=args.blocks,
         run_num=args.run,
 
         local_env="$HOME/Projects/globus_stream/streams-cli/bin/activate",
-        #local_env=str(Path("~/Projects/globus_stream/streams-cli/bin/activate").expanduser()),
         remote_env="$HOME/streams-cli/bin/activate",
-        #remote_env=f"/home/{args.remote_user}/streams-cli/bin/activate",
         report_dir=args.output,
     )
 
 
-# def get_config() -> Config:
-#     args = parse_args()
-#     return build_config(args)
 def get_configs() -> list[Config]:
     args = parse_args()
 

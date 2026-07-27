@@ -8,16 +8,28 @@ from typing import Sequence
 from config import Config
 from remote import run_subprocess, popen_subprocess
 
-# f"--name daq-{i} "
-# f"-v $HOME/tomo_00058.h5:/mnt/tomo_00058.h5:ro "
+# "the original dataset has: (1500, 2160, 2560)
+# and the sample one has (1500, 2, 2560)
+#         #f"-v $HOME/{shlex.quote(tomo)}:/mnt/{shlex.quote(tomo)}:ro "
+#         #f"--simulation_file /mnt/{shlex.quote(tomo)} "
 def _daq_service(port: int, file: str, i: int) -> str:
+    if file == "tomo_00058.h5":
+        simu_file_path = f"/mnt/{shlex.quote(file)}"
+        mount_drive = f"-v $HOME/{shlex.quote(file)}:/mnt/{shlex.quote(file)}:ro"
+    else:
+        simu_file_path =  f"/aps-mini-apps/data/{shlex.quote(file)}"
+        mount_drive = ""
     return (
         f"docker run --rm --network host "
         f"--name daq-{i} "
-        f"seenv/aps-mini-apps-daq:latest "
+        #f"-v $HOME/{shlex.quote(tomo)}:/mnt/{shlex.quote(tomo)}:ro "
+        f"{mount_drive} "
+        f"seenv/aps-mini-apps-daq:v1.1 "
         f"python /aps-mini-apps/build/python/streamer-daq/DAQStream.py "
         f"--mode 1 "
-        f"--simulation_file /aps-mini-apps/data/{shlex.quote(file)} "
+        # f"--simulation_file /aps-mini-apps/data/{shlex.quote(file)} "
+        # f"--simulation_file /mnt/{shlex.quote(tomo)} "
+        f"--simulation_file {simu_file_path} "
         f"--d_iteration 10000 "
         f"--publisher_addr tcp://*:{port} "
         f"--iteration_sleep=1 "
@@ -25,13 +37,8 @@ def _daq_service(port: int, file: str, i: int) -> str:
         f"--synch_count 1; "
     )
     
-def _dist_service(
-    # init_gw_ip: str,
-    # init_gw_port: int,
-    ip: str,
-    port: int,
-    i: int,
-) -> str:
+def _dist_service(ip: str, port: int, file: str, i: int) -> str:
+    num_sino = 2160 if file == "tomo_00058.h5" else 2
     return (
         f"docker run --rm --network host "
         f"--name dist-{i} "
@@ -44,7 +51,7 @@ def _dist_service(
         f"--normalize "
         f"--my_distributor_addr tcp://127.0.0.1:4200{i} "
         f"--beg_sinogram 1500 "
-        f"--num_sinograms 2 "
+        f"--num_sinograms {num_sino} "
         f"--num_columns 2560; "
     )
 
@@ -65,11 +72,7 @@ def _sirt_service(i: int) -> str:
         f"-c 1427 "
         f"--pub-addr tcp://*:5300{i}; "
     )
-def _get_container_stats(
-    cfg: Config, 
-    host: str,
-    timeout: int, check: bool = False,
-) -> int:
+def _get_container_stats(cfg: Config, host: str, timeout: int, check: bool = False) -> int:
     cp = run_subprocess(
         host, None,
         #f"docker ps -aq | wc -l && "           # counts all the containers
@@ -140,7 +143,7 @@ def _start_mini_service(
             cmd = _daq_service(start_port + (i * 2), file, i)
         elif service == "dist":
             # cmd = _dist_service(initiator_gw_ip, tunnel_port, i)
-            cmd = _dist_service(listener_ip, listen_port, i)
+            cmd = _dist_service(listener_ip, listen_port, file, i)
         elif service == "sirt":
             cmd = _sirt_service(i)
 
