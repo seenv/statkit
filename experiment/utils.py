@@ -437,7 +437,7 @@ def init_listener_env(cfg: Config, listener_ip: str, tunnel_id: str, port: int, 
     logging.debug("IPERF: Listener environment initializing on %s:\n%s", host.upper(), cp.stdout.strip())
 
 
-def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> int:
+def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> tuple[int, str, int]:
     host = cfg.hosts.ep["initiator"]
     cp = run_subprocess(
         host, cfg.remote_env,
