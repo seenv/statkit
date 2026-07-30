@@ -565,18 +565,13 @@ def experiment_main(cfg: Config) -> None:
             f"arg={arg}, splice={splice}, encrypt={encrypt}, run={run}"
         )
         try:
-            logging.info("")
-            # logging.info(
-            #     "--------------- Config: %d:%d / %d : NUMA %s / blocksize %s / parallel %s / arg %s / splice %s / encrypt %s / run %s ---------------",
-            #     idx, idx * len(test_apps), total_tests, numa, block, arg, splice, encrypt, run, parallel
-            # )
-            logging.info(
-                "--------------- Config: %d:%d / %d : NUMA %s / blocksize %s / parallel %s / arg %s / splice %s / encrypt %s / run %s ---------------",
-                idx, idx * tests_per_config, total_tests, numa, block, parallel, arg, splice, encrypt, run, 
-            )
-
-            # test_idx, files = 0, []
             test_idx, files = ((idx - 1) * tests_per_config), []
+            logging.info("")
+            logging.info(
+                "--------------- Config: %d / %d : NUMA %s / blocksize %s / parallel %s / arg %s / splice %s / encrypt %s / run %s ---------------",
+                test_idx, total_tests, numa, block, parallel, arg, splice, encrypt, run, 
+            )
+            logging.info("")
 
             if idx == 1 and (not(cfg.is_test)):
                 logging.info("SYS: Recording the system reports")
