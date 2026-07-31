@@ -7,7 +7,7 @@ import time
 #from config import get_config
 from config import get_configs
 from launcher import experiment_main
-from utils import setup_logging, send_ntfy, cleanup_file
+from utils import setup_logging, send_ntfy, cleanup_file, report_log_dir
 
 
 def main() -> None:
@@ -17,8 +17,7 @@ def main() -> None:
     for cfg in configs:
         #print(cfg)
         #log_dir = Path(f"/tmp/{cfg.lease}/{cfg.test}/statkit")
-        test_name = Path(cfg.report_dir).name
-        log_dir = Path.home() / "Projects" / "globus_stream" / "statkit" / "results" / "reports" / cfg.lease.lower() / cfg.test / test_name
+        log_dir = report_log_dir(cfg)
         log_dir.mkdir(parents=True, exist_ok=True)
 
         log_path = log_dir / f"{datetime.now().strftime('%m-%d-%H-%M')}.log"

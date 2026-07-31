@@ -49,6 +49,15 @@ def setup_logging(verbose: bool, log_path: str = "/tmp/statkit.log") -> None:
     root.addHandler(fh)
 
 
+def report_log_dir(cfg: Config) -> Path:
+    """Local directory on the control machine holding this run's log and ledger."""
+    test_name = Path(cfg.report_dir).name
+    return (
+        Path.home() / "Projects" / "globus_stream" / "statkit" / "results"
+        / "reports" / cfg.lease.lower() / cfg.test / test_name
+    )
+
+
 def notify(topic: str, title: str, message: str) -> None:
     subprocess.run(
         [
@@ -367,6 +376,57 @@ def stop_statkit(cfg: Config) -> None:
             localhost=cfg.localhost,
         )
         logging.debug("SYS: Stopped statkit on %s", host.upper())
+
+
+def _statkit_running(cfg: Config, host: str) -> bool:
+    # bracket form so the pgrep command line cannot match itself
+    cp = run_subprocess(
+        host, None,
+        r"pgrep -f 'monitor/[l]auncher\.py' || true",
+        localhost=cfg.localhost,
+        check=False,
+    )
+    return bool((cp.stdout or "").strip())
+
+
+def wait_statkit_stopped(cfg: Config, poll: int = 2, timeout: int = 60, kill_wait: int = 15) -> bool:
+    """Block until no monitor/launcher.py survives on any host.
+
+    stop_statkit only fires `pkill -TERM` through popen_subprocess and never
+    waits, so on return the signal may not even have been delivered. A survivor
+    would rewrite the CSVs a caller is about to delete.
+    Returns False if a monitor outlives SIGKILL, meaning the host is unusable.
+    """
+    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+    pending = [h for h in hosts if _statkit_running(cfg, h)]
+
+    deadline = time.monotonic() + timeout
+    while pending and time.monotonic() < deadline:
+        time.sleep(poll)
+        pending = [h for h in pending if _statkit_running(cfg, h)]
+    if not pending:
+        return True
+
+    logging.warning(
+        "SYS: statkit still running on %s after %ds, escalating to SIGKILL",
+        [h.upper() for h in pending], timeout,
+    )
+    for host in pending:
+        run_subprocess(
+            host, None,
+            r"pkill -KILL -f 'monitor/[l]auncher\.py' || true",
+            localhost=cfg.localhost,
+            check=False,
+        )
+
+    deadline = time.monotonic() + kill_wait
+    while pending and time.monotonic() < deadline:
+        time.sleep(poll)
+        pending = [h for h in pending if _statkit_running(cfg, h)]
+    if pending:
+        logging.error("SYS: statkit survived SIGKILL on %s", [h.upper() for h in pending])
+        return False
+    return True
 
 
 #-------------------------------------------------------------------------------

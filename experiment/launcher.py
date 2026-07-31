@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from functools import partial
 from pathlib import Path
 from typing import Sequence
 
@@ -27,6 +28,7 @@ from iperf import start_iperf_server, start_iperf_client, start_iperf_server_bas
 from rsync import stop_rsync_daemon, start_rsync_daemon_gst
 from rsync import start_rsync_transfer_gst, start_rsync_daemon_base, start_rsync_transfer_base, start_rsync_ssh
 from gtransfer import get_collection_id, start_globus_transfer, start_globus_transfer_multiple
+from retry import ledger_for, log_summary, run_with_retry
 
 
 # ------------------------------------------------------------------------------
@@ -352,8 +354,11 @@ def run_globus_transfer(
         #     parallel,
         #     arg, encrypt, files, "globus_gtr_s", output_dir, timeout
         # )
+        # NOTE: the "globus_gtr_s" tag above collides with the "globus_gtr*" glob
+        # retry.py deletes. Re-enabling it needs a tag that is not a prefix of
+        # another app's tag.
         start_globus_transfer_multiple(
-            cfg, listener_collection_id, initiator_collection_id, transfer_label, 
+            cfg, listener_collection_id, initiator_collection_id, transfer_label,
             parallel,
             arg, encrypt, files, "globus_gtr", output_dir, timeout
         )
@@ -556,6 +561,10 @@ def experiment_main(cfg: Config) -> None:
     # total_tests = total_runs * len(cfg.test)
     total_tests = total_runs * tests_per_config
 
+    ledger = ledger_for(cfg)
+    logging.info("MAIN: Up to %d attempt(s) per test, %ds apart. Retry ledger: %s",
+                 cfg.retry_attempts, cfg.retry_delay, ledger.path)
+
     for idx, (numa, block, parallel, arg, splice, encrypt, run) in enumerate(test_config, start=1):
         created_files = False
         mode_dir = net_mode_dir(splice, encrypt)
@@ -564,6 +573,11 @@ def experiment_main(cfg: Config) -> None:
             f"numa={numa}, block={block}, parallel={parallel}, "
             f"arg={arg}, splice={splice}, encrypt={encrypt}, run={run}"
         )
+        ledger_fields = {
+            "lease": cfg.lease, "test": cfg.test, "numa": numa, "block": block,
+            "parallel": parallel, "arg": arg, "splice": splice,
+            "encrypt": encrypt, "run": run,
+        }
         try:
             test_idx, files = ((idx - 1) * tests_per_config), []
             logging.info("")
@@ -614,24 +628,36 @@ def experiment_main(cfg: Config) -> None:
                 #time.sleep(cfg.sleep)
 
                 start_port = cfg.encrypt_port if encrypt else cfg.tunnel_port
-                run_iperf_gst(
-                    #cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
-                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                    parallel=parallel, arg=arg, files=files, start_port=start_port,
-                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa, output_dir=output_dir,
-                    encrypt=encrypt
+                run_with_retry(
+                    cfg, app="iperf_gst", prefix="IGST", output_dir=output_dir,
+                    context=context, ledger=ledger,
+                    fields={**ledger_fields, "idx": test_idx},
+                    fn=partial(
+                        run_iperf_gst,
+                        #cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run,
+                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                        parallel=parallel, arg=arg, files=files, start_port=start_port,
+                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa, output_dir=output_dir,
+                        encrypt=encrypt
+                    ),
                 )
                 #time.sleep(cfg.sleep)
 
             if "ibase" in cfg.app:
                 test_idx += 1
                 start_port = cfg.direct_port
-                run_iperf_base(
-                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                    parallel=parallel, arg=arg, files=files, start_port=start_port,
-                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa, output_dir=output_dir, encrypt=encrypt
+                run_with_retry(
+                    cfg, app="iperf_base", prefix="IBASE", output_dir=output_dir,
+                    context=context, ledger=ledger,
+                    fields={**ledger_fields, "idx": test_idx},
+                    fn=partial(
+                        run_iperf_base,
+                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                        parallel=parallel, arg=arg, files=files, start_port=start_port,
+                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa, output_dir=output_dir, encrypt=encrypt
+                    ),
                 )
                 #time.sleep(cfg.sleep)
 
@@ -646,22 +672,34 @@ def experiment_main(cfg: Config) -> None:
                 logging.info("GTR: Recording the Gridftp configuration")
                 gridftp_report(cfg, output_dir)
                 
-                run_rsync_gst(
-                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                    parallel=parallel, arg=arg, files=files, rsync_port=cfg.rsync_port,
-                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa, output_dir=output_dir, encrypt=encrypt,
+                run_with_retry(
+                    cfg, app="rsync_gst", prefix="RGST", output_dir=output_dir,
+                    context=context, ledger=ledger,
+                    fields={**ledger_fields, "idx": test_idx},
+                    fn=partial(
+                        run_rsync_gst,
+                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                        parallel=parallel, arg=arg, files=files, rsync_port=cfg.rsync_port,
+                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa, output_dir=output_dir, encrypt=encrypt,
+                    ),
                 )
 
 
             if "rbase" in cfg.app and cfg.test == "transfer":
                 test_idx += 1
                 rsync_port = cfg.rsync_port
-                run_rsync_base(
-                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                    parallel=parallel, arg=arg, files=files, rsync_port=rsync_port,
-                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa, output_dir=output_dir, encrypt=encrypt,
+                run_with_retry(
+                    cfg, app="rsync_base", prefix="RBASE", output_dir=output_dir,
+                    context=context, ledger=ledger,
+                    fields={**ledger_fields, "idx": test_idx},
+                    fn=partial(
+                        run_rsync_base,
+                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                        parallel=parallel, arg=arg, files=files, rsync_port=rsync_port,
+                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa, output_dir=output_dir, encrypt=encrypt,
+                    ),
                 )
                 #time.sleep(cfg.sleep)
 
@@ -672,53 +710,71 @@ def experiment_main(cfg: Config) -> None:
                 #restart_gridftp(cfg)
                 #time.sleep(cfg.sleep)
                 
-                run_globus_transfer(
-                    # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
-                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                    parallel=parallel, arg=arg, files=files,
-                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa, output_dir=output_dir, encrypt=encrypt,
+                run_with_retry(
+                    cfg, app="globus_gtr", prefix="GTR", output_dir=output_dir,
+                    context=context, ledger=ledger,
+                    fields={**ledger_fields, "idx": test_idx},
+                    fn=partial(
+                        run_globus_transfer,
+                        # cfg, idx=idx, total_runs=total_runs, timeout=timeout, temp_file=temp_file,
+                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                        parallel=parallel, arg=arg, files=files,
+                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa, output_dir=output_dir, encrypt=encrypt,
+                    ),
                 )
                 #time.sleep(cfg.sleep)
 
             if "mini" in cfg.app and cfg.test == "stream":
                 test_idx += 1
                 start_port = cfg.mini_port
-                run_mini_gst(
-                    cfg,
-                    idx=test_idx,
-                    #total_runs=total_runs,
-                    total_runs=total_tests,
-                    timeout=timeout,
-                    tomo_file=cfg.tomo_file,
-                    parallel=parallel,
-                    arg=arg,
-                    start_port=start_port,
-                    listener_host=cfg.hosts.ep["listener"],
-                    initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa,
-                    output_dir=output_dir,
-                    encrypt=encrypt,
+                run_with_retry(
+                    cfg, app="mini_gst", prefix="MGST", output_dir=output_dir,
+                    context=context, ledger=ledger,
+                    fields={**ledger_fields, "idx": test_idx},
+                    fn=partial(
+                        run_mini_gst,
+                        cfg,
+                        idx=test_idx,
+                        #total_runs=total_runs,
+                        total_runs=total_tests,
+                        timeout=timeout,
+                        tomo_file=cfg.tomo_file,
+                        parallel=parallel,
+                        arg=arg,
+                        start_port=start_port,
+                        listener_host=cfg.hosts.ep["listener"],
+                        initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa,
+                        output_dir=output_dir,
+                        encrypt=encrypt,
+                    ),
                 )
                 
             if "mbase" in cfg.app and cfg.test == "stream":
                 test_idx += 1
                 start_port = cfg.mini_port
-                run_mini_base(
-                    cfg,
-                    idx=test_idx,
-                    #total_runs=total_runs,
-                    total_runs=total_tests,
-                    timeout=timeout,
-                    tomo_file=cfg.tomo_file,
-                    parallel=parallel,
-                    arg=arg,
-                    start_port=start_port,
-                    listener_host=cfg.hosts.ep["listener"],
-                    initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa,
-                    output_dir=output_dir,
-                    encrypt=encrypt,
+                run_with_retry(
+                    cfg, app="mini_base", prefix="MBASE", output_dir=output_dir,
+                    context=context, ledger=ledger,
+                    fields={**ledger_fields, "idx": test_idx},
+                    fn=partial(
+                        run_mini_base,
+                        cfg,
+                        idx=test_idx,
+                        #total_runs=total_runs,
+                        total_runs=total_tests,
+                        timeout=timeout,
+                        tomo_file=cfg.tomo_file,
+                        parallel=parallel,
+                        arg=arg,
+                        start_port=start_port,
+                        listener_host=cfg.hosts.ep["listener"],
+                        initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa,
+                        output_dir=output_dir,
+                        encrypt=encrypt,
+                    ),
                 )
 
             time.sleep(cfg.sleep)
@@ -728,6 +784,7 @@ def experiment_main(cfg: Config) -> None:
                 "EXPERIMENT: Configuration failed: %s",
                 context,
             )
+            log_summary(ledger)
             raise RuntimeError(
                 f"Experiment configuration failed: {context}: {exc}"
             ) from exc
@@ -742,3 +799,5 @@ def experiment_main(cfg: Config) -> None:
         #                 "EXPERIMENT: File cleanup failed: %s",
         #                 context,
         #             )
+
+    log_summary(ledger)

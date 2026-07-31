@@ -12,6 +12,16 @@ def _ssh_base(host: str) -> list[str]:
     return ["ssh", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=10", "-o", "ControlMaster=no", "-o", "TCPKeepAlive=yes", host, "bash", "-lc"]
 
 
+class SSHFailure(RuntimeError):
+    """SSH transport failure: rc 255 with a transport-level stderr needle.
+
+    Raised instead of a plain RuntimeError when is_ssh_failure() holds, so the
+    retry layer can tell "the host is gone" apart from "the command failed".
+    Note rc 255 alone is not enough: on the host == localhost path _build_argv
+    runs bash -lc locally, where 255 is the local command's own exit code.
+    """
+
+
 def is_ssh_failure(cp: subprocess.CompletedProcess[str]) -> bool:
     if cp.returncode != 255:
         return False
@@ -58,7 +68,9 @@ def run_subprocess(host: str, env: Optional[str], cmd: str, *,
         if cp.returncode == 0:
             return cp
 
-        err = RuntimeError(
+        retryable = is_ssh_failure(cp)
+        err_cls = SSHFailure if retryable else RuntimeError
+        err = err_cls(
             f"Command failed on host={host}\n"
             f"ARGV: {argv}\n"
             f"RC={cp.returncode}\n"
@@ -69,7 +81,6 @@ def run_subprocess(host: str, env: Optional[str], cmd: str, *,
         if not check:
             return cp
 
-        retryable = is_ssh_failure(cp)
         if retryable and attempt < total_attempts:
             logging.warning(
                 "SSH command failed on %s (attempt %d/%d), retrying in %.1fs",

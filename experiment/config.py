@@ -23,6 +23,15 @@ def _parse_int_list(s: str) -> list[int]:
         raise argparse.ArgumentTypeError("Integer list cannot be empty")
     return values
 
+def _parse_positive_int(s: str) -> int:
+    try:
+        value = int(s)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"Invalid integer: {s}") from e
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"Expected a value of 1 or more, got {value}")
+    return value
+
 def _parse_str_list(s: str) -> list[str]:
     values = [x.strip() for x in s.split(",") if x.strip()]
     if not values:
@@ -195,6 +204,10 @@ class Config:
     blocks: Sequence[int]
     run_num: int
 
+    retry_attempts: int
+    retry_delay: int
+    retry_ledger: str
+
     local_env: str
     remote_env: str
     report_dir: str
@@ -245,6 +258,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--size", "-n", type=_parse_int_list, default=[1])
     parser.add_argument("--blocks", "-b", type=_parse_int_list, default=[32])
     parser.add_argument("--run", "-r", type=int, default=1)
+
+    parser.add_argument("--retry-attempts", type=_parse_positive_int, default=5, help="Total attempts per test, including the first; 1 disables retries")
+    parser.add_argument("--retry-delay", type=int, default=30, help="Seconds to wait between a failed attempt and its retry")
+    parser.add_argument("--retry-ledger", type=str, default=None, help="Path to the retry ledger CSV; defaults to retries.csv beside the run log")
 
     parser.add_argument("--output", "-o", default="/tmp/")
 
@@ -321,6 +338,10 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         file_sizes=args.size if not is_stream else [],
         blocks=args.blocks,
         run_num=args.run,
+
+        retry_attempts=args.retry_attempts,
+        retry_delay=max(0, args.retry_delay),
+        retry_ledger=args.retry_ledger or "",
 
         local_env="$HOME/Projects/globus_stream/streams-cli/bin/activate",
         remote_env="$HOME/streams-cli/bin/activate",
