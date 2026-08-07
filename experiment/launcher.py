@@ -8,8 +8,8 @@ from typing import Sequence
 from config import Config
 
 from utils import make_file, cleanup_file, start_statkit, stop_statkit
-from utils import get_stream_id, start_tunnel, status_tunnel, stop_tunnel, delete_tunnel
-from utils import init_listener_env, init_initiator_env
+from gstreams import get_stream_id, start_tunnel, status_tunnel, stop_tunnel, delete_tunnel
+from gstreams import init_listener_env, init_initiator_env
 from utils import restart_gridftp, gridftp_config, gridftp_report, logging_gridftp
 #from utils import start_iperf_server, start_iperf_client, cleanup_iperf
 # from utils import start_iperf_server_base, start_iperf_client_base
@@ -27,7 +27,8 @@ from iperf import start_iperf_server, start_iperf_client, start_iperf_server_bas
 from rsync import stop_rsync_daemon, start_rsync_daemon_gst
 from rsync import start_rsync_transfer_gst, start_rsync_daemon_base, start_rsync_transfer_base, start_rsync_ssh
 from gtransfer import get_collection_id, start_globus_transfer, start_globus_transfer_multiple
-
+from scistream import start_scistream, stop_scistream
+from iperf import start_iperf_server_scistream, start_iperf_client_scistream
 
 # ------------------------------------------------------------------------------
 # iPerf3 GST
@@ -179,6 +180,58 @@ def run_iperf_base(
             stop_statkit(cfg)
 
 
+# ------------------------------------------------------------------------------
+# iPerf3 SciStream
+def run_iperf_scistream(
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, 
+    parallel: int, arg: int,
+    files: list[str], 
+    start_port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
+    encrypt: int, app_tag: str,
+) -> None:
+    
+    logging.info("")
+    logging.info("----- Test %d / %d: Starting iPerf3 Scistream Tests -----", idx, total_runs)
+    
+    stream_ids, listen_ports = [], []
+    listen_ip = cfg.listener_pub
+    
+    try:
+        logging.info("ISCI: Creating SciStream %d tunnels ", parallel)
+        stream_id, listen_ports = start_scistream(cfg, parallel, timeout)
+
+        if not cfg.is_test:
+            logging.info("ISCI: Starting the statkit monitoring on the hosts")
+            start_statkit(cfg, timeout, app_tag, output_dir)   #size as duration which will be * 60s
+            time.sleep(cfg.sleep)
+
+        for i in range(parallel):
+            stream_ids.append(stream_id)
+
+        # start iperf server
+        logging.info("ISCI: Starting iperf server(s)")
+        start_iperf_server_scistream(cfg, listener_host, cfg.inbound_ports, stream_ids, parallel, numa, output_dir, app_tag, files, timeout, temp_dir="/tmp/temp_files")
+        time.sleep(cfg.sleep)
+
+        # run iperf client
+        logging.info("ISCI: Starting iperf client")
+        start_iperf_client_scistream(cfg, initiator_host, cfg.initiator_ap_pub, stream_ids, cfg.outbound_ports, parallel, numa, arg, files, app_tag, output_dir, timeout)
+
+        if not cfg.is_test:   
+            logging.info("ISCI: Recording the RTT")
+            record_ping(cfg, initiator_host, cfg.listener_pub, app_tag, output_dir)
+
+    except Exception as e:
+        raise RuntimeError(f"ISCI: Runtime Error: {e}") from e
+
+    finally:
+        cleanup_iperf(cfg)
+        stop_scistream(cfg)
+        if not cfg.is_test:
+            logging.info("ISCI: Stopping the statkit monitoring on the hosts")
+            stop_statkit(cfg)
+ 
+ 
 # ------------------------------------------------------------------------------
 # Rsync GST
 def run_rsync_gst(
@@ -636,6 +689,22 @@ def experiment_main(cfg: Config) -> None:
                 #time.sleep(cfg.sleep)
 
 
+            if "stunnel" in cfg.proxy or "haproxy" in cfg.proxy:
+                if "iperf" in cfg.app:
+                    run_iperf_scistream(
+                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                        parallel=parallel, arg=arg, files=files, start_port=start_port,
+                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="iperf_sci"
+                    )
+                if "ibase" in cfg.app:
+                    run_iperf_scistream(
+                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                        parallel=parallel, arg=arg, files=files, start_port=start_port,
+                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="ibase_sci"
+                    )
+                
             if "rsync" in cfg.app and cfg.test == "transfer":
                 test_idx += 1
                 if block != last_block or splice != last_splice or encrypt != last_encrypt:
