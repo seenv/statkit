@@ -206,8 +206,10 @@ def run_iperf_scistream(
             time.sleep(cfg.sleep)
 
         for i in range(parallel):
+            listen_ports.append(start_port + (i * 2))
             stream_ids.append(stream_id)
-
+        time.sleep(5)
+        
         # start iperf server
         logging.info("ISCI: Starting iperf server(s)")
         start_iperf_server_scistream(cfg, listener_host, cfg.inbound_ports, stream_ids, parallel, numa, output_dir, app_tag, files, timeout, temp_dir="/tmp/temp_files")
@@ -215,6 +217,7 @@ def run_iperf_scistream(
 
         # run iperf client
         logging.info("ISCI: Starting iperf client")
+        #start_iperf_client_scistream(cfg, initiator_host, cfg.initiator_ap_pub, stream_ids, cfg.outbound_ports, parallel, numa, arg, files, app_tag, output_dir, timeout)
         start_iperf_client_scistream(cfg, initiator_host, cfg.initiator_ap_pub, stream_ids, cfg.outbound_ports, parallel, numa, arg, files, app_tag, output_dir, timeout)
 
         if not cfg.is_test:   
@@ -592,6 +595,7 @@ def experiment_main(cfg: Config) -> None:
         (
             "iperf" in cfg.app,
             "ibase" in cfg.app,
+            "sperf" in cfg.app,
             "rsync" in cfg.app and cfg.test == "transfer",
             "rbase" in cfg.app and cfg.test == "transfer",
             "gtr" in cfg.app and cfg.test == "transfer",
@@ -651,59 +655,63 @@ def experiment_main(cfg: Config) -> None:
 
             timeout = (arg * 120) * 10
 
+            #if "apache" in cfg.proxy:
             if "iperf" in cfg.app:
-                test_idx += 1
-                if block != last_block or splice != last_splice or encrypt != last_encrypt:
-                    logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
-                    gridftp_config(cfg, block, splice, encrypt, output_dir)
-                    last_block, last_splice, last_encrypt= block, splice, encrypt
-                    #time.sleep(15)
-                    #hosts = list(cfg.hosts.ap.values())
-                    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
-                    restart_gridftp(cfg, hosts)
-                    time.sleep(cfg.sleep)
-                logging.info("GTR: Recording the Gridftp configuration")
-                gridftp_report(cfg, output_dir)
-                #time.sleep(cfg.sleep)
+                    test_idx += 1
+                    if block != last_block or splice != last_splice or encrypt != last_encrypt:
+                        logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
+                        gridftp_config(cfg, block, splice, encrypt, output_dir)
+                        last_block, last_splice, last_encrypt= block, splice, encrypt
+                        #time.sleep(15)
+                        #hosts = list(cfg.hosts.ap.values())
+                        hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+                        restart_gridftp(cfg, hosts)
+                        time.sleep(cfg.sleep)
+                    logging.info("GTR: Recording the Gridftp configuration")
+                    gridftp_report(cfg, output_dir)
+                    #time.sleep(cfg.sleep)
 
-                start_port = cfg.encrypt_port if encrypt else cfg.tunnel_port
-                run_iperf_gst(
-                    #cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
-                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                    parallel=parallel, arg=arg, files=files, start_port=start_port,
-                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa, output_dir=output_dir,
-                    encrypt=encrypt
-                )
-                #time.sleep(cfg.sleep)
-
-            if "ibase" in cfg.app:
-                test_idx += 1
-                start_port = cfg.direct_port
-                run_iperf_base(
-                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                    parallel=parallel, arg=arg, files=files, start_port=start_port,
-                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa, output_dir=output_dir, encrypt=encrypt
-                )
-                #time.sleep(cfg.sleep)
-
-
-            if "stunnel" in cfg.proxy or "haproxy" in cfg.proxy:
-                if "iperf" in cfg.app:
-                    run_iperf_scistream(
+                    start_port = cfg.encrypt_port if encrypt else cfg.tunnel_port
+                    run_iperf_gst(
+                        #cfg, idx=idx, total_runs=total_runs, timeout=timeout, #block=block, run=run, 
                         cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
                         parallel=parallel, arg=arg, files=files, start_port=start_port,
+                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa, output_dir=output_dir,
+                        encrypt=encrypt
+                    )
+                    time.sleep(cfg.sleep)
+
+            if "ibase" in cfg.app:
+                    test_idx += 1
+                    start_port = cfg.direct_port
+                    run_iperf_base(
+                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                        parallel=parallel, arg=arg, files=files, start_port=start_port,
+                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                        numa=numa, output_dir=output_dir, encrypt=encrypt
+                    )
+                    time.sleep(cfg.sleep)
+
+            #if "stunnel" in cfg.proxy or "haproxy" in cfg.proxy:
+            #if "stunnel" in cfg.proxy:
+            if "sperf" in cfg.app:
+                    test_idx += 1   
+                    run_iperf_scistream(
+                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                        parallel=parallel, arg=arg, files=files, start_port=cfg.inbound_ports[0],
                         listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                         numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="iperf_sci"
                     )
-                if "ibase" in cfg.app:
-                    run_iperf_scistream(
-                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                        parallel=parallel, arg=arg, files=files, start_port=start_port,
-                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                        numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="ibase_sci"
-                    )
+                    time.sleep(cfg.sleep)
+                # if "ibase" in cfg.app:
+                #     test_idx += 1 
+                #     run_iperf_scistream(
+                #         cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                #         parallel=parallel, arg=arg, files=files, start_port=cfg.outbound_ports[0],
+                #         listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                #         numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="ibase_sci"
+                #     )
                 
             if "rsync" in cfg.app and cfg.test == "transfer":
                 test_idx += 1

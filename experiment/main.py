@@ -71,8 +71,9 @@ def main() -> None:
                 cleanup_file(cfg)
             except Exception:
                 logging.exception("MAIN: File cleanup failed for %s", cfg.test)
-            logging.info("MAIN: Sleeping for 60 seconds before the next test")
-            time.sleep(60)
+            if cfg != configs[-1]:
+                logging.info("MAIN: Sleeping for 60 seconds before the next test")
+                time.sleep(30)
 
     if failures:
         details = "\n".join(

@@ -53,7 +53,7 @@ def _parse_proxy_list(s: str) -> list[str]:
     return proxies
 
 def _parse_app_list(s: str) -> list[str]:
-    valid_apps = {"iperf", "ibase", "rsync", "rbase", "gtr", "mini", "mbase"}
+    valid_apps = {"iperf", "ibase", "sperf", "rsync", "rbase", "gtr", "mini", "mbase"}
     apps = _parse_str_list(s)
     invalid = sorted(set(apps) - valid_apps)
     if invalid:
@@ -123,10 +123,10 @@ def _default_ips_for_lease(lease: str) -> dict[str, str]:
             "initiator_ip": "192.168.20.10",
             "initiator_pub": "192.168.20.10",
 
-            "listener_ap_ip": "128.135.24.119",
-            "listener_ap_pub": "128.135.164.119",
-            "initiator_ap_ip": "128.135.37.241",
-            "initiator_ap_pub": "128.135.164.120",
+            "listener_ap_ip": "192.168.10.20",
+            "listener_ap_pub": "192.168.100.10",
+            "initiator_ap_ip": "192.168.20.20",
+            "initiator_ap_pub": "192.168.100.20",
         }
     elif lease.lower() == "guys":
         return {
@@ -160,8 +160,8 @@ def _default_interfaces_for_lease(
         }
     elif lease.lower() == "fabric":
         return {
-            "initiator_ap": ["enp7s0np0", "enp8s0np1"],
-            "listener_ap": ["enp7s0np0", "enp8s0np1"],
+            "initiator_ap": ["enp8s0np0", "enp9s0np1"],
+            "listener_ap": ["enp8s0np0", "enp9s0np1"],
             "initiator_ep": ["enp7s0", "enp8s0"],
             "listener_ep": ["enp7s0", "enp8s0"],
         }
@@ -212,7 +212,7 @@ class Config:
     is_test: bool
     lease: str
     test: TestMode
-    proxy: Sequence[str]
+    #proxy: Sequence[str]
 
     numactl: Sequence[str]
     tcp_buffer: str
@@ -241,7 +241,7 @@ class Config:
     mbase_port: int
     scisync_port: int
     inbound_ports: Sequence[int]
-    outbound_ports=Sequence[int]
+    outbound_ports: Sequence[int]
     tomo_file: str
 
     sleep: int
@@ -266,9 +266,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run stream or transfer experiments.")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--is-test", action="store_true")
-    parser.add_argument("--lease", type=str.lower, required=True, choices=["fabric", "chameleon"], help="Lease name on the testbed")
+    parser.add_argument("--lease", type=str.lower, required=True, choices=["fabric", "chameleon", "guys"], help="Lease name on the testbed")
     parser.add_argument("--test", type=_parse_test_list, required=True, help="Comma-separated test modes: stream,transfer")
-    parser.add_argument("--proxy", type=_parse_proxy_list, required=True, help="Comma-separated proxy types: apache,stunnel,haproxy")
+    #parser.add_argument("--proxy", type=_parse_proxy_list, required=True, help="Comma-separated proxy types: apache,stunnel,haproxy")
     parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
 
     parser.add_argument("--numactl", type=_parse_numa_list, required=True, help="Experimetns with numa tunning enabled")
@@ -302,14 +302,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mini-port", type=int, default=51060)
     parser.add_argument("--mbase-port", type=int, default=51075)
     parser.add_argument("--scisync-port", type=int, default=51100)
-    parser.add_argument("--inbound-ports", type=_parse_int_list, default=[51115,51116,51117,51118,51119])
-    parser.add_argument("--outbound-ports", type=_parse_int_list, default=[51130,51131,51132,51133,51134])
+    #parser.add_argument("--inbound-ports", type=_parse_int_list, default=[51115,51116,51117,51118,51119])
+    #parser.add_argument("--outbound-ports", type=_parse_int_list, default=[51130,51131,51132,51133,51134])
+    parser.add_argument("--inbound-ports", type=_parse_int_list, default=[51115])
+    parser.add_argument("--outbound-ports", type=_parse_int_list, default=[51130])
     parser.add_argument("--tomo-file", type=str, default="tomo_00058_all_subsampled1p_s1079s1081.h5", choices=["tomo_00058_all_subsampled1p_s1079s1081.h5", "tomo_00058.h5"])
 
     parser.add_argument("--sleep", type=int, default=5)
 
-    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,rsync,rbase,gtr,mini,mbase")
-    parser.add_argument("--encrypt", action="store_true", help="Enabling encryption and disabling the splice", default=[0])
+    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,sperf,rsync,rbase,gtr,mini,mbase")
+    parser.add_argument("--encrypt", action="store_true", help="Enabling encryption and disabling the splice")
     parser.add_argument("--splice", type=_parse_int_list, help="Splice option, 0: disable, 1: enable")
     parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])
     parser.add_argument("--time", "-t", type=_parse_int_list, default=[15])
@@ -355,7 +357,7 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         is_test=args.is_test,
         lease=args.lease,
         test=test_mode,
-        proxy=args.proxy,
+        # proxy=args.proxy,
 
         numactl=args.numactl,
         tcp_buffer=args.tcp_buffer,

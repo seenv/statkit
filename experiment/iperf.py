@@ -106,13 +106,13 @@ def start_iperf_client(
             
             f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
             
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}{i}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
             "globus-streams-launch "
             f"{shlex.quote(stream_id)} "                                                    #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -c globus.{shlex.quote(stream_id)} -p {listen_port} "                 #f"iperf3 -c globus.{shlex.quote(tunnel_id)} -B {cfg.initiator_ip} -p {contact_port} "
             f"-Z -R -P 1 --timestamps --forceflush "
             f"{extra_arg} "
-            f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json ; "
+            f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             
             f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
             f"}} 2>&1 | tr '\\r' '\\n' "
@@ -121,17 +121,19 @@ def start_iperf_client(
             
             f"rc=$?; "
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
+            f"sleep 1; "
             f"exit $rc ",
             localhost=cfg.localhost,
             # timeout=timeout,
         )
         processes.append((cp, listen_port))
     
-    #time.sleep(arg + 10 + (cfg.sleep * 2))
     # for cp, listen_port in processes:
     #     stdout, stderr = cp.communicate()
+    #     results.append((listen_port, stdout, stderr, cp.returncode))
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
+        time.sleep(cfg.sleep)
         results.append((listen_port, stdout, stderr, cp.returncode))
         # if cp.returncode != 0:
         #     logging.error("IGST: Process on port %s failed with return code %s: %s", listen_port, cp.returncode, stderr)
@@ -197,7 +199,7 @@ def start_iperf_server_base(
         cp = popen_subprocess(
             host, None,
             f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "                #f"numactl --cpunodebind=1 --preferred=1 "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "                #f"numactl --cpunodebind=1 --preferred=1 "
             f"iperf3 -s -p {start_port + (i * 2)} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
@@ -236,21 +238,26 @@ def start_iperf_client_base(
         cp = popen_subprocess(
             host, None,
             f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}{i}-time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -c {listener_pub} -p {listen_port} "                                                      #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
             f"-Z -R -P 1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             f"rc=$?; "
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
+            f"sleep 1; "
             f"exit $rc ",
             localhost=cfg.localhost,
             #timeout= timeout,
         )
         processes.append((cp, listen_port))
-
+    # time.sleep(int(arg)+int(cfg.sleep))
+    # for cp, listen_port in processes:
+    #     stdout, stderr = cp.communicate()
+    #     results.append((listen_port, stdout, stderr, cp.returncode))
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
+        time.sleep(cfg.sleep)
         results.append((listen_port, stdout, stderr, cp.returncode))
             
     for listen_port, stdout, stderr, returncode in results:
@@ -317,8 +324,9 @@ def start_iperf_server_scistream(
         cp = popen_subprocess(
             host, None,
             f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "                #f"numactl --cpunodebind=1 --preferred=1 "
-            f"iperf3 -s -p {start_ports[i]} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "                #f"numactl --cpunodebind=1 --preferred=1 "
+            #f"iperf3 -s -p {start_ports[i]} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
+            f"iperf3 -s -p 5074 -1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             f"rc=$?; "
@@ -356,32 +364,41 @@ def start_iperf_client_scistream(
         cp = popen_subprocess(
             host, None,
             f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}{i}-time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
-            f"iperf3 -c {listener_pub} -p {listen_port} "                                                      #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
+            f"iperf3 -c {listener_pub} -p 5100 "                                                      #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
+            #f"iperf3 -c 128.135.164.120 -p 5100 "
             f"-Z -R -P 1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             f"rc=$?; "
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
+            f"sleep 1; "
             f"exit $rc ",
             localhost=cfg.localhost,
             #timeout= timeout,
         )
         processes.append((cp, listen_port))
-
+    #time.sleep(int(arg)+int(cfg.sleep)*2)
+    #print(int(arg)+int(cfg.sleep))
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
+        time.sleep(cfg.sleep)
         results.append((listen_port, stdout, stderr, cp.returncode))
             
     for listen_port, stdout, stderr, returncode in results:
         if returncode != 0:
             logging.error("ISCI: Process on port %s failed with return code %s: %s", listen_port, returncode, stderr)
-        #tail = "\n".join(stdout.splitlines()[-29:-21])
-        #logging.info("IGST: iPerf3 log on %s %s", host.upper(), tail)
-        #return cp
+        
         tail = "\n".join(stdout.splitlines()[-29:-21])
         logging.debug("ISCI: iPerf log on port %s of %s \n%s", listen_port, host.upper(), tail)
         seconds = float(re.search(r'"seconds":\s*([\d.]+)', tail).group(1))
+        # m = re.search(r'"seconds":\s*([\d.]+)', tail)
+        # if not m:
+        #     logging.error("ISCI: No parseable summary on port %s (rc=%s):\n%s",
+        #                 listen_port, returncode, stdout[-2000:])
+        #     continue
+        #seconds = float(m.group(1))
+        
         size_bytes = int(re.search(r'"bytes":\s*(\d+)', tail).group(1))
         bits_per_second = float(re.search(r'"bits_per_second":\s*([\d.]+)', tail).group(1))
         retransmits = int(re.search(r'"retransmits":\s*(\d+)', tail).group(1))
