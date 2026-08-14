@@ -50,38 +50,17 @@ def setup_logging(verbose: bool, log_path: str = "/tmp/statkit.log") -> None:
 
 
 def notify(topic: str, title: str, message: str) -> None:
-    subprocess.run(
-        [
-            "curl",
-            "-H", f"Title: {title}",
-            "-d", message,
-            f"https://ntfy.sh/{topic}",
-        ],
-        check=False,
-    )
+    subprocess.run(["curl", "-H", f"Title: {title}", "-d", message, f"https://ntfy.sh/{topic}"], check=False)
 
-
-def send_ntfy(success: bool, cfg: Config, error: Exception | None = None) -> None:
+def send_ntfy(success: bool, cfg: Config, msg: Exception | None = None) -> None:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if success:
         title = f"Experiment '{cfg.test.capitalize()}' finished"
-        message = (
-            f"Lease: {cfg.lease}\n"
-            f"Time: {now}\n"
-        )
+        message = (f"\n Lease: {cfg.lease} \n Time: {now} \n Message:{msg}\n")
     else:
         title = f"Experiment '{cfg.test.capitalize()}' failed"
-        message = (
-            f"Lease: {cfg.lease}\n"
-            f"Time: {now}\n"
-            f"Error:{error}\n"
-            #f"Traceback:\n{traceback.format_exc()}"
-        )
-    notify(
-        topic=f"{cfg.test.replace(' ', '-')}",
-        title=title,
-        message=message,
-    )
+        message = (f"\n Lease: {cfg.lease} \n Time: {now} \n Message:{msg}\n")
+    notify(topic=f"{cfg.test.replace(' ', '-')}", title=title, message=message)
 
 
 #-------------------------------------------------------------------------------

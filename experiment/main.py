@@ -37,7 +37,7 @@ def main() -> None:
                     f"{type(exc).__name__}: {exc}\n\n"
                     f"{traceback_text[-3000:]}"
                 )
-                send_ntfy(success=False, cfg=cfg, error=notif_err)
+                send_ntfy(success=False, cfg=cfg, msg=notif_err)
             except Exception:
                 logging.exception("MAIN: Failed to send failure notification for %s", cfg.test)
             
@@ -46,24 +46,25 @@ def main() -> None:
         else:
             logging.info("MAIN: %s experiment completed successfully", cfg.test)
             try: 
-                send_ntfy(success=True, cfg=cfg)
+                notif_done = (
+                    f"\nFinished runing the experiment with vals: \n"
+                    f"logfile: {log_path} \n"
+                    f"Lease: {cfg.lease} \n",
+                    f"Test: {cfg.test} \n",
+                    f"Apps: {cfg.app} \n",
+                    f"Splice: {cfg.splice} \n",
+                    f"Parallels: {cfg.parallels} \n",
+                    f"Time Frames: {cfg.time_frames} \n",
+                    f"File sizes: {cfg.file_sizes} \n",
+                    f"Block sizes: {cfg.blocks} \n",
+                    f"Repeat runs: {cfg.run_num} \n",
+                )
+                send_ntfy(success=True, cfg=cfg, msg=notif_done)
     
             except Exception:
                 logging.exception("MAIN: Failed to send success notification for %s", cfg.test)
 
-            print(
-                f"\nFinished runing the experiment with vals: \n"
-                f"logfile: {log_path} \n"
-                f"Lease: {cfg.lease} \n",
-                f"Test: {cfg.test} \n",
-                f"Apps: {cfg.app} \n",
-                f"Splice: {cfg.splice} \n",
-                f"Parallels: {cfg.parallels} \n",
-                f"Time Frames: {cfg.time_frames} \n",
-                f"File sizes: {cfg.file_sizes} \n",
-                f"Block sizes: {cfg.blocks} \n",
-                f"Repeat runs: {cfg.run_num} \n",
-                )
+            print(notif_done)
 
         finally:
             logging.info("MAIN: Finalizing %s experiment. Log file: %s", cfg.test, log_path)
