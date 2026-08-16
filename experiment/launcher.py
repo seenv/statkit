@@ -625,8 +625,8 @@ def experiment_main(cfg: Config) -> None:
             test_idx, files = ((idx - 1) * tests_per_config), []
             logging.info("")
             logging.info(
-                "--------------- Config: %d / %d : NUMA %s / blocksize %s / parallel %s / arg %s / splice %s / encrypt %s / run %s ---------------",
-                test_idx, total_tests, numa, block, parallel, arg, splice, encrypt, run, 
+                "--------------- Test: %s : NUMA %s / blocksize %s / parallel %s / arg %s / splice %s / encrypt %s / run %s ---------------",
+                cfg.test, numa, block, parallel, arg, splice, encrypt, run, 
             )
             logging.info("")
 

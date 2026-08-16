@@ -8,6 +8,7 @@ import time
 from config import get_configs
 from launcher import experiment_main
 from utils import setup_logging, send_ntfy, cleanup_file
+from utils import copy_results
 
 
 def main() -> None:
@@ -47,17 +48,17 @@ def main() -> None:
             logging.info("MAIN: %s experiment completed successfully", cfg.test)
             try: 
                 notif_done = (
-                    f"\nFinished runing the experiment with vals: \n"
-                    f"logfile: {log_path} \n"
-                    f"Lease: {cfg.lease} \n",
-                    f"Test: {cfg.test} \n",
-                    f"Apps: {cfg.app} \n",
-                    f"Splice: {cfg.splice} \n",
-                    f"Parallels: {cfg.parallels} \n",
-                    f"Time Frames: {cfg.time_frames} \n",
-                    f"File sizes: {cfg.file_sizes} \n",
-                    f"Block sizes: {cfg.blocks} \n",
-                    f"Repeat runs: {cfg.run_num} \n",
+                    f"Finished experiment successfully: "
+                    f"logfile: {log_path} "
+                    f"Lease: {cfg.lease} ",
+                    f"Apps: {cfg.app} ",
+                    f"Splice: {cfg.splice} ",
+                    f"Encrypt: {cfg.encrypt} ",
+                    f"Parallels: {cfg.parallels} ",
+                    f"Time Frames: {cfg.time_frames} ",
+                    f"File sizes: {cfg.file_sizes} ",
+                    f"Block sizes: {cfg.blocks} ",
+                    f"Runs: {cfg.run_num} ",
                 )
                 send_ntfy(success=True, cfg=cfg, msg=notif_done)
     
@@ -70,6 +71,7 @@ def main() -> None:
             logging.info("MAIN: Finalizing %s experiment. Log file: %s", cfg.test, log_path)
             try:
                 cleanup_file(cfg)
+                copy_results(cfg)
             except Exception:
                 logging.exception("MAIN: File cleanup failed for %s", cfg.test)
             if cfg != configs[-1]:

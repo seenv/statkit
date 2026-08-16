@@ -18,8 +18,8 @@ def _parse_int_list(s: str) -> list[int]:
         values = [int(x.strip()) for x in s.split(",") if x.strip()]
     except ValueError as e:
         raise argparse.ArgumentTypeError(f"Invalid integer list: {s}") from e
-    if not values:
-        raise argparse.ArgumentTypeError("Integer list cannot be empty")
+    # if not values:
+    #     raise argparse.ArgumentTypeError("Integer list cannot be empty")
     return values
 
 def _parse_str_list(s: str) -> list[str]:
@@ -312,7 +312,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,sperf,rsync,rbase,gtr,mini,mbase")
     parser.add_argument("--encrypt", action="store_true", help="Enabling encryption and disabling the splice")
-    parser.add_argument("--splice", type=_parse_int_list, help="Splice option, 0: disable, 1: enable")
+    #parser.add_argument("--splice", type=_parse_int_list, help="Splice option, 0: disable, 1: enable")
+    parser.add_argument("--splice", type=_parse_int_list, default=None, help="Splice option, 0: disable, 1: enable")
     parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])
     parser.add_argument("--time", "-t", type=_parse_int_list, default=[15])
     parser.add_argument("--size", "-n", type=_parse_int_list, default=[1])
@@ -321,7 +322,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--output", "-o", default="/tmp/")
 
-    return parser.parse_args()
+    #return parser.parse_args()
+    return parser, parser.parse_args()
 
 
 def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
@@ -402,7 +404,8 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
 
         app=args.app,
         encrypt=bool(args.encrypt),
-        splice=args.splice,
+        #splice=args.splice,
+        splice=args.splice if args.splice is not None else [],
         parallels=args.parallel,
         time_frames=args.time if is_stream else [],
         file_sizes=args.size if not is_stream else [],
@@ -415,11 +418,16 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         report_dir=args.output,
     )
 
+# def get_configs() -> list[Config]:
+#     args = parse_args()
+
+#     return [
+#         build_config(args, test_mode)
+#         for test_mode in args.test
+#     ]
 
 def get_configs() -> list[Config]:
-    args = parse_args()
-
-    return [
-        build_config(args, test_mode)
-        for test_mode in args.test
-    ]
+    parser, args = parse_args()
+    if not args.splice and not args.encrypt:
+        parser.error("at least one of --splice or --encrypt is required")
+    return [build_config(args, test_mode) for test_mode in args.test]

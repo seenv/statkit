@@ -74,12 +74,13 @@ def build_net_modes(splices: Sequence[int], include_encrypt: bool) -> list[tuple
     Encryption is intentionally not combined with splice.
     """
     modes: list[tuple[int, int]] = []
-    for splice in splices:
-        if splice not in (0, 1):
-            raise ValueError(f"Invalid splice value: {splice}. Expected 0 or 1.")
-        mode = (splice, 0)
-        if mode not in modes:
-            modes.append(mode)
+    if splices:
+        for splice in splices:
+            # if splice not in (0, 1):
+            #     raise ValueError(f"Invalid splice value: {splice}. Expected 0 or 1.")
+            mode = (splice, 0)
+            if mode not in modes:
+                modes.append(mode)
     if include_encrypt:
         mode = (0, 1)
         if mode not in modes:
@@ -89,17 +90,24 @@ def build_net_modes(splices: Sequence[int], include_encrypt: bool) -> list[tuple
     return modes
 
 
+# def net_mode_dir(splice: int, encrypt: int) -> str:
+#     if splice == 0: # and encrypt == 0:
+#         return "A0"
+#     #if splice == 1 and encrypt == 0:
+#     if splice == 1:
+#         return "A1"
+#     #if splice == 0 and encrypt == 1:
+#     if encrypt == 1:
+#         return "E1"
+#     raise ValueError(f"Invalid mode: splice={splice}, encrypt={encrypt}")
 def net_mode_dir(splice: int, encrypt: int) -> str:
-    if splice == 0 and encrypt == 0:
-        return "A0"
-    #if splice == 1 and encrypt == 0:
-    if splice == 1:
-        return "A1"
-    #if splice == 0 and encrypt == 1:
     if encrypt == 1:
         return "E1"
+    if splice == 0:
+        return "A0"
+    if splice == 1:
+        return "A1"
     raise ValueError(f"Invalid mode: splice={splice}, encrypt={encrypt}")
-
 
 def parse_size_to_bytes(size: str) -> int:
     # s = str(size).strip().upper()
@@ -156,6 +164,79 @@ def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
     )
     logging.debug("RSYNC: Prepared destination on %s: file=%s", host.upper(), dest_path)
 
+
+def copy_results(cfg, check: bool = True) -> None:
+
+    if cfg.lease.lower() == "chameleon":
+        hosts = [
+            ("chi-trans-consap", "cons-ap"),
+            ("chi-trans-consep", "cons-ep"),
+            ("chi-trans-prodap", "prod-ap"),
+            ("chi-trans-prodep", "prod-ep"),
+        ]
+    elif cfg.lease.lower() == "fabric":
+        hosts = [
+            ("mfab-c2cs", "cons-ap"),
+            ("mfab-cons", "cons-ep"),
+            ("mfab-p2cs", "prod-ap"),
+            ("mfab-prod", "prod-ep"),
+        ]
+    elif cfg.lease.lower() == "guys":
+        hosts = [
+            ("neat-guy", "cons-ap"),
+            ("that-guy", "prod-ap"),
+            ("swell-guy", "cons-ep"),
+            ("this-guy", "prod-ep"),
+        ]
+
+    try:
+        for numa in cfg.numactl:
+            test_type = cfg.test
+            test_bed = cfg.lease.lower()
+            test_dir = Path(cfg.report_dir).name
+            child_dir = f'{numa}/{cfg.tcp_buffer}/{cfg.ring_buffer}'
+            proj_dir		= f"/home/seena/Projects/globus_stream/statkit/results"  
+            base_dir      = f"{proj_dir}/reports/{test_bed}/{test_type}/{test_dir}/{child_dir}"   # root where node folders live
+            output_dir    = f"{proj_dir}/analysis/{test_bed}/{test_type}/{test_dir}/{child_dir}"
+            report_dir		= f"{proj_dir}/reports/{test_bed}/{test_type}"
+
+            print(f"TEST_TYPE  : {test_type}")
+            print(f"BASE_DIR    : {base_dir}")
+            print(f"OUTPUT_DIR : {output_dir}")
+        
+            for host, dest_name in hosts:
+                cp = run_subprocess(
+                    cfg.localhost, None,
+                    f"rsync -av --mkpath --ignore-existing "
+                    #f"rsync -avznc --itemize-changes "
+                    #f"-e ssh {host}:/tmp/exps/{test_bed}/{test_dir}/{test_type}/{child_dir}/ "
+                    f"-e ssh {host}:/tmp/{test_dir}/{test_type}/{child_dir}/ "
+                    f"{report_dir}/{test_dir}/{child_dir}/{dest_name}/ " ,
+                    localhost=cfg.localhost,
+                )
+                if check and cp.returncode != 0:
+                    raise RuntimeError(
+                        f"COPY: Failed copying the reports on {host.upper()}"
+                        f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+                    )
+
+            if test_type == "transfer" and "gtr" in cfg.app:
+                cp = run_subprocess(
+                    cfg.localhost, None,
+                    f"rsync -av --mkpath --ignore-existing "
+                    #f"rsync -avznc --itemize-changes "
+                    f"/tmp/exps/{test_bed}/{test_dir}/{test_type}/{child_dir}/ "
+                    f"/tmp/{test_dir}/{test_type}/{child_dir}/ "
+                    f"{report_dir}/{test_dir}/{child_dir}/cons-ep/ ",
+                    localhost=cfg.localhost,
+                )
+                if check and cp.returncode != 0:
+                    raise RuntimeError(
+                        f"COPY: Failed copying the reports on {cfg.localhost.upper()}"
+                        f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+                    )
+    except Exception as e:
+        raise RuntimeError(f"COPY: Runtime Error: {e}") from e
 
 # _UUID_CANDIDATE = re.compile(r"[0-9a-fA-F-]{32,36}")
 # def _parse_uid(output: str) -> str:
