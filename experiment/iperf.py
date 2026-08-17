@@ -292,7 +292,8 @@ def start_iperf_client_base(
 def start_iperf_server_scistream(
     cfg: Config, 
     host: str,
-    start_ports: Sequence[int],
+    #start_ports: Sequence[int],
+    listen_ep_ports: Sequence[int],
     stream_ids: Sequence[str],
     parallel: int, 
     numa: str,
@@ -308,8 +309,8 @@ def start_iperf_server_scistream(
     if not (len(stream_ids) == parallel):
         raise RuntimeError(f"ISCI: Expected all lists to have length parallel={parallel}, but got tunnel ids={len(stream_ids)}")
     processes = []
-
-    for i, stream_id in enumerate(stream_ids):
+    #for i in range(len(listen_ep_ports)):
+    for i, (listen_port, stream_id) in enumerate(zip(listen_ep_ports, stream_ids)):
         extra_arg = f"-F {shlex.quote(temp_dir)}/{shlex.quote(files[i])}" if cfg.test == "transfer" else ""
         # numa: str, out_dir: str, temp_dir: str = "/tmp/temp_files") -> subprocess.Popen[str]:
         # numa_node, numa_cpus = get_numa_node(cfg, host, dev) if numa == "numa" else (None, "")
@@ -326,7 +327,8 @@ def start_iperf_server_scistream(
             f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "                #f"numactl --cpunodebind=1 --preferred=1 "
             #f"iperf3 -s -p {start_ports[i]} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
-            f"iperf3 -s -p 5074 -1 --timestamps --forceflush "
+            #f"iperf3 -s -p {listen_ep_ports[i]} -1 --timestamps --forceflush "
+            f"iperf3 -s -p {listen_port} -1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             f"rc=$?; "
@@ -336,13 +338,15 @@ def start_iperf_server_scistream(
         )
         #logging.info("ISCI: Started iperf3 server on %s", host.upper())
         processes.append(cp)
-        logging.debug("ISCI: Started iperf3 server on port %d on host %s", (start_ports[i]), host.upper())
+        logging.debug("ISCI: Started iperf3 server on port %d on host %s", (listen_ep_ports[i]), host.upper())
 
 
 def start_iperf_client_scistream(
     cfg: Config, host: str, 
     listener_pub: str, 
-    stream_ids: Sequence[str], listen_ports: Sequence[int],
+    stream_ids: Sequence[str], 
+    # listen_ports: Sequence[int],
+    initiate_ap_ports: Sequence[int],
     parallel: int, numa: str, arg: int, 
     file: str, 
     app: str,  out_dir: str, timeout: int, 
@@ -350,14 +354,15 @@ def start_iperf_client_scistream(
     retries: int = 100,
     check: bool = True,
 ) -> list[subprocess.CompletedProcess[str]]:
-    if not (len(listen_ports) == parallel):
-        raise RuntimeError(f"ISCI: Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
+    if not (len(initiate_ap_ports) == parallel):
+        raise RuntimeError(f"ISCI: Expected all lists to have length parallel={parallel}, but got listen ports={len(initiate_ap_ports)}")
 
-    processes,results = [], []
+    processes, results = [], []
     duration, throughput, bytes_transferred, retransmissions = 0, 0, 0, 0
     size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
     chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
-    for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
+    #for i in range(len(initiate_ap_ports)):
+    for i, (listen_port, stream_id) in enumerate(zip(initiate_ap_ports, stream_ids)):
         file_size = chunk_size + (1 if i < remainder else 0)
         extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
         #cp = run_subprocess(
@@ -365,7 +370,7 @@ def start_iperf_client_scistream(
             host, None,
             f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
-            f"iperf3 -c {listener_pub} -p 5100 "                                                      #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
+            f"iperf3 -c {listener_pub} -p {listen_port} "                                                      #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
             #f"iperf3 -c 128.135.164.120 -p 5100 "
             f"-Z -R -P 1 --timestamps --forceflush "
             f"{extra_arg} "
@@ -378,6 +383,8 @@ def start_iperf_client_scistream(
             #timeout= timeout,
         )
         processes.append((cp, listen_port))
+        #processes.append((cp, initiate_ap_ports[i]))
+        logging.debug("ISCI: Started iperf3 client on port %d on host %s", (initiate_ap_ports[i]), host.upper())
     #time.sleep(int(arg)+int(cfg.sleep)*2)
     #print(int(arg)+int(cfg.sleep))
     for cp, listen_port in processes:
@@ -389,6 +396,8 @@ def start_iperf_client_scistream(
         if returncode != 0:
             logging.error("ISCI: Process on port %s failed with return code %s: %s", listen_port, returncode, stderr)
         
+        #data = json.loads(stdout)   
+        #bps = data["end"]["sum_sent"]["bits_per_second"]
         tail = "\n".join(stdout.splitlines()[-29:-21])
         logging.debug("ISCI: iPerf log on port %s of %s \n%s", listen_port, host.upper(), tail)
         seconds = float(re.search(r'"seconds":\s*([\d.]+)', tail).group(1))
@@ -402,10 +411,7 @@ def start_iperf_client_scistream(
         size_bytes = int(re.search(r'"bytes":\s*(\d+)', tail).group(1))
         bits_per_second = float(re.search(r'"bits_per_second":\s*([\d.]+)', tail).group(1))
         retransmits = int(re.search(r'"retransmits":\s*(\d+)', tail).group(1))
-        logging.debug(
-            "iPerf3 log %s Throughput(Gbps): %.6f | Duration(sec): %.2f | Retransmits: %s | Size: %.4f",
-            host.upper(), bits_per_second / 1e9, seconds, retransmits, size_bytes / 1e9
-        )
+        logging.debug("Gbps: %.6f | Sec: %.2f | Retrans: %s | Size: %.4f", bits_per_second / 1e9, seconds, retransmits, size_bytes / 1e9)
         duration = max(duration, seconds)
         throughput += (bits_per_second / 1e9)
         bytes_transferred += (size_bytes / 1e9)

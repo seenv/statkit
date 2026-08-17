@@ -71,7 +71,8 @@ def main() -> None:
             logging.info("MAIN: Finalizing %s experiment. Log file: %s", cfg.test, log_path)
             try:
                 cleanup_file(cfg)
-                copy_results(cfg)
+                if not cfg.is_test:
+                    copy_results(cfg)
             except Exception:
                 logging.exception("MAIN: File cleanup failed for %s", cfg.test)
             if cfg != configs[-1]:

@@ -198,27 +198,28 @@ def run_iperf_scistream(
     
     try:
         logging.info("ISCI: Creating SciStream %d tunnels ", parallel)
-        stream_id, listen_ports = start_scistream(cfg, parallel, timeout)
+        stream_ids, listen_ap_ports, initiate_ap_ports, listen_ep_ports, initiate_ep_ports = start_scistream(cfg, encrypt, parallel, timeout)
 
         if not cfg.is_test:
             logging.info("ISCI: Starting the statkit monitoring on the hosts")
             start_statkit(cfg, timeout, app_tag, output_dir)   #size as duration which will be * 60s
             time.sleep(cfg.sleep)
 
-        for i in range(parallel):
-            listen_ports.append(start_port + (i * 2))
-            stream_ids.append(stream_id)
-        time.sleep(5)
+        # for i in range(parallel):
+        #     #listen_ports.append(cfg.inbound_ports[0] + (i))
+        #     stream_ids.append(stream_id)
+        # time.sleep(5)
         
         # start iperf server
         logging.info("ISCI: Starting iperf server(s)")
-        start_iperf_server_scistream(cfg, listener_host, cfg.inbound_ports, stream_ids, parallel, numa, output_dir, app_tag, files, timeout, temp_dir="/tmp/temp_files")
+        #start_iperf_server_scistream(cfg, listener_host, cfg.inbound_ports, stream_ids, parallel, numa, output_dir, app_tag, files, timeout, temp_dir="/tmp/temp_files")
+        start_iperf_server_scistream(cfg, listener_host, listen_ep_ports, stream_ids, parallel, numa, output_dir, app_tag, files, timeout, temp_dir="/tmp/temp_files")
         time.sleep(cfg.sleep)
 
         # run iperf client
         logging.info("ISCI: Starting iperf client")
         #start_iperf_client_scistream(cfg, initiator_host, cfg.initiator_ap_pub, stream_ids, cfg.outbound_ports, parallel, numa, arg, files, app_tag, output_dir, timeout)
-        start_iperf_client_scistream(cfg, initiator_host, cfg.initiator_ap_pub, stream_ids, cfg.outbound_ports, parallel, numa, arg, files, app_tag, output_dir, timeout)
+        start_iperf_client_scistream(cfg, initiator_host, cfg.initiator_ap_ip, stream_ids, initiate_ap_ports, parallel, numa, arg, files, app_tag, output_dir, timeout)
 
         if not cfg.is_test:   
             logging.info("ISCI: Recording the RTT")
