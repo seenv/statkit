@@ -283,116 +283,116 @@ def copy_results(cfg, check: bool = True) -> None:
 
 #-------------------------------------------------------------------------------
 # Gridftp config and reset
-def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, check: bool = True) -> None:
-    if awai not in (0, 1):
-        raise ValueError(f"Invalid splice value: {awai}. Expected 0 or 1")
-    if encr not in (0, 1):
-        raise ValueError(f"Invalid encrypt value: {encr}. Expected 0 or 1")
-    if awai == 1 and encr == 1:
-        raise ValueError("Invalid GridFTP mode: splice=1 and encrypt=1 cannot both be enabled.")
-    globus_gridftp_debug_log = f"{out_dir}/globus-gridftp-debug.log"
-    splice_buffer_size = blk * (1024 ** 2)
-    for host in cfg.hosts.ap.values():
-        if encr == 1:
-            splice_line = "#$AWAI_SPLICE_ROUTING 0"
-            encrypt_line = "$AWAI_WAN_ENCRYPTION 1"
-            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
-        elif awai == 1:
-            splice_line = "$AWAI_SPLICE_ROUTING 1"
-            encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
-            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
-        else:
-            splice_line = "#$AWAI_SPLICE_ROUTING 0"
-            encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
-            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
-        extra = (
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|{splice_line}|' "
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|{encrypt_line}|' "
-            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|{buffer_line}|' "
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_GRIDFTP_SERVER_DEBUG[[:space:]]+.*$|$GLOBUS_GRIDFTP_SERVER_DEBUG ALL,{globus_gridftp_debug_log},1,ALL|' "
-        )
-        cp = run_subprocess(
-            host, None,
-            f"mkdir -p {shlex.quote(out_dir)} && "
-            f"sudo sed -i -E "
-            f"-e 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' "
-            f"{extra} "
-            f"/etc/gridftp.d/zdebug && "
-            #f"sudo systemctl restart apache2.service && "
-            #f"sudo systemctl restart globus-gridftp-server.service && "
-            #f"sudo systemctl restart gridftp-server-restarter.service && "
-            f"sudo cat /etc/gridftp.d/zdebug ",
-            localhost=cfg.localhost
-        )
-        if check and cp.returncode != 0:
-            raise RuntimeError(
-                f"GTR: Failed changing the blocksize on {host.upper()}"
-                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-            )
-        #head = "\n".join(cp.stdout.splitlines()[:5])
-        head = "\n".join(cp.stdout.splitlines())
-        logging.debug("GTR: Gridftp splice and blocksize config on %s:\n%s", host.upper(), head)
+# def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, check: bool = True) -> None:
+#     if awai not in (0, 1):
+#         raise ValueError(f"Invalid splice value: {awai}. Expected 0 or 1")
+#     if encr not in (0, 1):
+#         raise ValueError(f"Invalid encrypt value: {encr}. Expected 0 or 1")
+#     if awai == 1 and encr == 1:
+#         raise ValueError("Invalid GridFTP mode: splice=1 and encrypt=1 cannot both be enabled.")
+#     globus_gridftp_debug_log = f"{out_dir}/globus-gridftp-debug.log"
+#     splice_buffer_size = blk * (1024 ** 2)
+#     for host in cfg.hosts.ap.values():
+#         if encr == 1:
+#             splice_line = "#$AWAI_SPLICE_ROUTING 0"
+#             encrypt_line = "$AWAI_WAN_ENCRYPTION 1"
+#             buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+#         elif awai == 1:
+#             splice_line = "$AWAI_SPLICE_ROUTING 1"
+#             encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
+#             buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+#         else:
+#             splice_line = "#$AWAI_SPLICE_ROUTING 0"
+#             encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
+#             buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+#         extra = (
+#             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|{splice_line}|' "
+#             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|{encrypt_line}|' "
+#             #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|{buffer_line}|' "
+#             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_GRIDFTP_SERVER_DEBUG[[:space:]]+.*$|$GLOBUS_GRIDFTP_SERVER_DEBUG ALL,{globus_gridftp_debug_log},1,ALL|' "
+#         )
+#         cp = run_subprocess(
+#             host, None,
+#             f"mkdir -p {shlex.quote(out_dir)} && "
+#             f"sudo sed -i -E "
+#             f"-e 's|^[[:space:]]*blocksize[[:space:]]+.*$|blocksize {blk}M|' "
+#             f"{extra} "
+#             f"/etc/gridftp.d/zdebug && "
+#             #f"sudo systemctl restart apache2.service && "
+#             #f"sudo systemctl restart globus-gridftp-server.service && "
+#             #f"sudo systemctl restart gridftp-server-restarter.service && "
+#             f"sudo cat /etc/gridftp.d/zdebug ",
+#             localhost=cfg.localhost
+#         )
+#         if check and cp.returncode != 0:
+#             raise RuntimeError(
+#                 f"GTR: Failed changing the blocksize on {host.upper()}"
+#                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+#             )
+#         #head = "\n".join(cp.stdout.splitlines()[:5])
+#         head = "\n".join(cp.stdout.splitlines())
+#         logging.debug("GTR: Gridftp splice and blocksize config on %s:\n%s", host.upper(), head)
 
 
-def logging_gridftp(cfg: Config, out_dir: str, check: bool = True) -> None:
-    audit_log = shlex.quote(f'{out_dir}/gridftp-audit.log')
-    single_log = shlex.quote(f'{out_dir}/gridftp-single.log')
+# def logging_gridftp(cfg: Config, out_dir: str, check: bool = True) -> None:
+#     audit_log = shlex.quote(f'{out_dir}/gridftp-audit.log')
+#     single_log = shlex.quote(f'{out_dir}/gridftp-single.log')
 
-    for host in cfg.hosts.ep.values():
-        cp = run_subprocess(
-            host, None,
-            f"sudo sed -i -E "
-            f"-e 's|^[[:space:]]*log_audit[[:space:]]+.*$|log_audit {audit_log}|' "
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_single[[:space:]]+.*$|log_single {single_log}|' "
-            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_transfer[[:space:]]+.*$|log_transfer {transfer_log}|' "
-            f"/etc/gridftp.d/z_logging && "
-            f"sudo cat /etc/gridftp.d/z_logging ",
-            localhost=cfg.localhost,
-        )
-        if check and cp.returncode != 0:
-            raise RuntimeError(
-                f"GTR: Failed changing GridFTP logging paths on {host.upper()}\n"
-                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-            )
-
-
-def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
-    for host in cfg.hosts.ap.values():
-        cp = run_subprocess(
-            host, None,
-            f"mkdir -p {shlex.quote(out_dir)} && "
-            f"sudo cat /etc/gridftp.d/zdebug > {shlex.quote(out_dir)}/gridftp-stream.log ",
-            localhost=cfg.localhost
-        )
-        if check and cp.returncode != 0:
-            raise RuntimeError(
-                f"GTR: Failed changing the gridftp configuration on {host.upper()}"
-                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-            )
-        logging.debug("GTR: Recorded the Gridftp configuration on %s", host.upper())
+#     for host in cfg.hosts.ep.values():
+#         cp = run_subprocess(
+#             host, None,
+#             f"sudo sed -i -E "
+#             f"-e 's|^[[:space:]]*log_audit[[:space:]]+.*$|log_audit {audit_log}|' "
+#             f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_single[[:space:]]+.*$|log_single {single_log}|' "
+#             #f"-e 's|^[[:space:]]*#?[[:space:]]*\\log_transfer[[:space:]]+.*$|log_transfer {transfer_log}|' "
+#             f"/etc/gridftp.d/z_logging && "
+#             f"sudo cat /etc/gridftp.d/z_logging ",
+#             localhost=cfg.localhost,
+#         )
+#         if check and cp.returncode != 0:
+#             raise RuntimeError(
+#                 f"GTR: Failed changing GridFTP logging paths on {host.upper()}\n"
+#                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+#             )
 
 
-def restart_gridftp(cfg: Config, hosts: list[str], check: bool = True) -> None:
-    # hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
-    for host in hosts:
-    # for host in cfg.hosts.ap.values():
-        cp = run_subprocess(
-            host, None,
-            f"sudo systemctl restart globus-gridftp-server.service && "
-            f"sudo systemctl restart apache2.service ",
-            #"sudo systemctl restart apache2.service && "
-            #"sudo systemctl restart gcs_manager.service && "
-            #"sudo systemctl restart gcs_manager_assistant.service && "
-            #f"sudo systemctl restart globus-gridftp-server.service && "
-            #f"sudo systemctl restart gridftp-server-restarter.service ",
-            localhost=cfg.localhost,
-        )
-        if check and cp.returncode != 0:
-            raise RuntimeError(
-                f"GTR: Failed restarting gridftp on {host.upper()}\n"
-                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-            )
-        logging.debug("GTR: Restarted gridftp on %s (%s)", host.upper(), cp.stdout.strip())
+# def gridftp_report(cfg: Config, out_dir: str, check: bool = True) -> None:
+#     for host in cfg.hosts.ap.values():
+#         cp = run_subprocess(
+#             host, None,
+#             f"mkdir -p {shlex.quote(out_dir)} && "
+#             f"sudo cat /etc/gridftp.d/zdebug > {shlex.quote(out_dir)}/gridftp-stream.log ",
+#             localhost=cfg.localhost
+#         )
+#         if check and cp.returncode != 0:
+#             raise RuntimeError(
+#                 f"GTR: Failed changing the gridftp configuration on {host.upper()}"
+#                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+#             )
+#         logging.debug("GTR: Recorded the Gridftp configuration on %s", host.upper())
+
+
+# def restart_gridftp(cfg: Config, hosts: list[str], check: bool = True) -> None:
+#     # hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+#     for host in hosts:
+#     # for host in cfg.hosts.ap.values():
+#         cp = run_subprocess(
+#             host, None,
+#             f"sudo systemctl restart globus-gridftp-server.service && "
+#             f"sudo systemctl restart apache2.service ",
+#             #"sudo systemctl restart apache2.service && "
+#             #"sudo systemctl restart gcs_manager.service && "
+#             #"sudo systemctl restart gcs_manager_assistant.service && "
+#             #f"sudo systemctl restart globus-gridftp-server.service && "
+#             #f"sudo systemctl restart gridftp-server-restarter.service ",
+#             localhost=cfg.localhost,
+#         )
+#         if check and cp.returncode != 0:
+#             raise RuntimeError(
+#                 f"GTR: Failed restarting gridftp on {host.upper()}\n"
+#                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+#             )
+#         logging.debug("GTR: Restarted gridftp on %s (%s)", host.upper(), cp.stdout.strip())
 
 
 #-------------------------------------------------------------------------------

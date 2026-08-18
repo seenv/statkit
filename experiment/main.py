@@ -45,34 +45,36 @@ def main() -> None:
             failures.append((cfg.test, exc, log_path, traceback_text))
 
         else:
-            logging.info("MAIN: %s experiment completed successfully", cfg.test)
+            notif_done = (
+                f"Finished experiment successfully:\n"
+                f"Logfile: {log_path}\n"
+                f"Lease: {cfg.lease}\n"
+                f"Apps: {cfg.app}\n"
+                f"Splice: {cfg.splice}\n"
+                f"Encrypt: {cfg.encrypt}\n"
+                f"Parallels: {cfg.parallels}\n"
+                f"Time Frames: {cfg.time_frames}\n"
+                f"File sizes: {cfg.file_sizes}\n"
+                f"Block sizes: {cfg.blocks}\n"
+                f"Runs: {cfg.run_num}"
+            )
+
             try: 
-                notif_done = (
-                    f"Finished experiment successfully: "
-                    f"logfile: {log_path} "
-                    f"Lease: {cfg.lease} ",
-                    f"Apps: {cfg.app} ",
-                    f"Splice: {cfg.splice} ",
-                    f"Encrypt: {cfg.encrypt} ",
-                    f"Parallels: {cfg.parallels} ",
-                    f"Time Frames: {cfg.time_frames} ",
-                    f"File sizes: {cfg.file_sizes} ",
-                    f"Block sizes: {cfg.blocks} ",
-                    f"Runs: {cfg.run_num} ",
-                )
                 send_ntfy(success=True, cfg=cfg, msg=notif_done)
-    
             except Exception:
                 logging.exception("MAIN: Failed to send success notification for %s", cfg.test)
-
-            print(notif_done)
+            
+            try:
+                copy_results(cfg)
+            except Exception:
+                logging.exception("MAIN: Failed to copy results for %s", cfg.test)
+            
+            logging.info("MAIN: %s experiment completed successfully: %s", cfg.test, notif_done)
 
         finally:
             logging.info("MAIN: Finalizing %s experiment. Log file: %s", cfg.test, log_path)
             try:
                 cleanup_file(cfg)
-                if not cfg.is_test:
-                    copy_results(cfg)
             except Exception:
                 logging.exception("MAIN: File cleanup failed for %s", cfg.test)
             if cfg != configs[-1]:

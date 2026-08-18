@@ -227,8 +227,8 @@ def outbound(
 def start_scistream(
     cfg: Config, encrypt: int,
     parallel: int, timeout: int,
-) -> tuple[Optional[str], Sequence[str]]:
-
+) -> tuple[list[str], list[int], list[int], list[int], list[int]]:
+#) -> tuple[Optional[str], Sequence[str]]:
     if encrypt:
         _replace_haproxy_cfg(cfg, 'haproxy.cfg.j2_encr')
     else:
