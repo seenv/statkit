@@ -9,7 +9,7 @@ from config import get_configs
 from launcher import experiment_main
 from utils import setup_logging, send_ntfy, cleanup_file
 from utils import copy_results
-
+import getpass, socket, os, sys, shlex
 
 def main() -> None:
     configs = get_configs()
@@ -17,14 +17,16 @@ def main() -> None:
 
     for cfg in configs:
         #print(cfg)
-        #log_dir = Path(f"/tmp/{cfg.lease}/{cfg.test}/statkit")
         test_name = Path(cfg.report_dir).name
         log_dir = Path.home() / "Projects" / "globus_stream" / "statkit" / "results" / "reports" / cfg.lease.lower() / cfg.test / test_name
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        log_path = log_dir / f"{datetime.now().strftime('%m-%d-%H-%M')}.log"
+        #log_path = log_dir / f"{datetime.now().strftime('%m-%d-%H-%M')}.log"
+        log_path = log_dir / f"{test_name}.log"
         setup_logging(cfg.verbose, str(log_path))
-
+        logging.info("MAIN: Command: %s", shlex.join(sys.argv))
+        logging.info("MAIN: Host: %s | User: %s | CWD: %s | PID: %s", socket.gethostname(), getpass.getuser(), os.getcwd(), os.getpid())
+        logging.info("MAIN: Python: %s", sys.version.split()[0])
         try:
             logging.info("MAIN: Starting the experiment at %s. Log file: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), log_path)
             experiment_main(cfg)

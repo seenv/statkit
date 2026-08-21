@@ -27,7 +27,7 @@ def setup_logging(verbose: bool, log_path: str = "/tmp/statkit.log") -> None:
     # root.handlers.clear()
     for h in list(root.handlers):
         root.removeHandler(h)
-        #h.close()
+        h.close()
     root.setLevel(logging.DEBUG)
     fmt = logging.Formatter(
         #"%(asctime)s %(levelname)s %(message)s",

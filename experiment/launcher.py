@@ -26,9 +26,8 @@ from iperf import start_iperf_server_scistream, start_iperf_client_scistream
 # iPerf3 GST
 def run_iperf_gst(
     cfg: Config, *, idx: int, total_runs: int, timeout: int, 
-    parallel: int, arg: int, 
-    files: list[str], 
-    start_port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
+    parallel: int, arg: int, files: list[str], start_port: int, 
+    listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int,
 ) -> None:
     logging.info("")
@@ -230,7 +229,7 @@ def run_rsync_gst(
 # Rsync Base
 def run_rsync_base(
     cfg: Config, *, idx: int, total_runs: int, timeout: int, 
-    parallel: int, arg: int, files: list[str], rsync_port: int, 
+    parallel: int, arg: int, files: list[str], start_port: int, 
     listener_host: str, initiator_host: str, numa: str, output_dir: str,
     encrypt: int
 ) -> None:
@@ -241,7 +240,7 @@ def run_rsync_base(
     listen_ip = cfg.listener_pub
     try:
         for i in range(parallel):
-            listen_ports.append(rsync_port + (i * 2))
+            listen_ports.append(start_port + (i * 2))
             stream_ids.append(listen_ip)
 
         if not cfg.is_test:
@@ -260,7 +259,7 @@ def run_rsync_base(
             logging.info("RBASE: Starting the rsync daemon on the host %s", listener_host.upper())
             start_rsync_daemon_base(
                 cfg, listener_host, 
-                rsync_port, stream_ids, parallel,
+                start_port, stream_ids, parallel,
                 numa, output_dir, timeout,
                 "rsync_base", "transfer", "/tmp/temp_files")
             time.sleep(cfg.sleep)
@@ -479,8 +478,8 @@ def experiment_main(cfg: Config) -> None:
             test_idx, files = ((idx - 1) * tests_per_config), []
             logging.info("")
             logging.info(
-                "--------------- Test: %s: No %d - %d / NUMA %s / blocksize %s / parallel %s / arg %s / splice %s / encrypt %s / run %s ---------------",
-                cfg.test.capitalize(), test_idx, total_tests, numa, block, parallel, arg, splice, encrypt, run, 
+                "--------------- Test: %s: No %d - %d | %d / NUMA %s / blocksize %s / parallel %s / arg %s / splice %s / encrypt %s / run %s ---------------",
+                cfg.test.capitalize(), test_idx + 1, test_idx + tests_per_config + 1, total_tests,  numa, block, parallel, arg, splice, encrypt, run, 
             )
             logging.info("")
 
@@ -550,19 +549,20 @@ def experiment_main(cfg: Config) -> None:
                 last_block, last_splice, last_encrypt = check_gridftp_config(
                     cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, output_dir
                 )
+                start_port=cfg.rsync_port
                 run_rsync_gst(
                     cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                    parallel=parallel, arg=arg, files=files, start_port=cfg.rsync_port,
+                    parallel=parallel, arg=arg, files=files, start_port=start_port,
                     listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                     numa=numa, output_dir=output_dir, encrypt=encrypt,
                 )
 
             if "rbase" in cfg.app and cfg.test == "transfer":
                 test_idx += 1
-                rsync_port = cfg.rsync_port
+                start_port = cfg.rsync_port
                 run_rsync_base(
                     cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                    parallel=parallel, arg=arg, files=files, rsync_port=rsync_port,
+                    parallel=parallel, arg=arg, files=files, start_port=start_port,
                     listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                     numa=numa, output_dir=output_dir, encrypt=encrypt,
                 )

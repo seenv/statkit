@@ -102,6 +102,7 @@ def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, che
     if awai == 1 and encr == 1:
         raise ValueError("Invalid GridFTP mode: splice=1 and encrypt=1 cannot both be enabled.")
     globus_gridftp_debug_log = f"{out_dir}/globus-gridftp-debug.log"
+    globus_xio_system_debug_log = f"{out_dir}/xio-system-debug.log"
     splice_buffer_size = blk * (1024 ** 2)
     for host in cfg.hosts.ap.values():
         if encr == 1:
@@ -121,6 +122,7 @@ def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, che
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|{encrypt_line}|' "
             #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|{buffer_line}|' "
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_GRIDFTP_SERVER_DEBUG[[:space:]]+.*$|$GLOBUS_GRIDFTP_SERVER_DEBUG ALL,{globus_gridftp_debug_log},1,ALL|' "
+            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_XIO_SYSTEM_DEBUG[[:space:]]+.*$|$GLOBUS_XIO_SYSTEM_DEBUG INFO,{globus_xio_system_debug_log}|' "
         )
         cp = run_subprocess(
             host, None,

@@ -43,7 +43,7 @@ def stop_rsync_daemon(
 # Rsync GST
 def start_rsync_daemon_gst(
     cfg: Config, src_host: str,
-    rsync_port: int, stream_ids: Sequence[str], parallel:int,
+    start_port: int, stream_ids: Sequence[str], parallel:int,
     numa: str, out_dir: str, timeout: int, 
     app: str, 
     module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
@@ -73,14 +73,14 @@ def start_rsync_daemon_gst(
             f"    list = yes\n"
             f"EOF\n"
 
-            f"globus-streams-launch -p {rsync_port + (i * 2)} {shlex.quote(stream_id)} "
-            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd{i}.conf --port={rsync_port + (i * 2)} "
+            f"globus-streams-launch -p {start_port + (i * 2)} {shlex.quote(stream_id)} "
+            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd{i}.conf --port={start_port + (i * 2)} "
             f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-daemon{i}.log; ",
             localhost=cfg.localhost,
             #timeout=timeout,
         )
         processes.append(cp)
-        logging.debug("RGST: Started rsync daemon on %s:%s", src_host.upper(), rsync_port + (i * 2))
+        logging.debug("RGST: Started rsync daemon on %s:%s", src_host.upper(), start_port + (i * 2))
         #logging.debug("RGST stdout:\n%s", cp.stdout)
     return processes
 
@@ -133,7 +133,7 @@ def start_rsync_transfer_gst(
 # Rsync Base
 def start_rsync_daemon_base(
     cfg: Config, src_host: str,
-    rsync_port: int, stream_ids: Sequence[str], parallel:int,
+    start_port: int, stream_ids: Sequence[str], parallel:int,
     numa: str, out_dir: str, timeout: int, 
     app: str, 
     module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
@@ -162,13 +162,13 @@ def start_rsync_daemon_base(
             f"    list = yes\n"
             f"EOF\n"
         
-            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd{i}.conf --port={rsync_port + (i * 2)} "
+            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd{i}.conf --port={start_port + (i * 2)} "
             f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-daemon{i}.log; ",
             localhost=cfg.localhost,
             #timeout=timeout,
         )
         processes.append(cp)
-        logging.debug("RBASE: Started rsync daemon on %s:%s", src_host.upper(), rsync_port + (i * 2))
+        logging.debug("RBASE: Started rsync daemon on %s:%s", src_host.upper(), start_port + (i * 2))
         #logging.debug("RGST stdout:\n%s", cp.stdout)
     return processes
 
