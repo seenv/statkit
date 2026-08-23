@@ -16,18 +16,17 @@ def stop_rsync_daemon(
     for i in range(parallel):
         cp = run_subprocess(
             host, None,
-            #f"if [ -f {shlex.quote(module_path)}/rsyncd{i}.pid ] && "
-            f"if [ -f {shlex.quote(module_path)}/rsyncd.pid ]; then "
-            #f"kill -9 $(cat {shlex.quote(module_path)}/rsyncd{i}.pid) 2>/dev/null; then "
-            #f" kill $(cat {shlex.quote(module_path)}/rsyncd.pid) "
+            #f"if [ -f {shlex.quote(module_path)}/rsyncd-{i}.pid ] && "
+            f"if [ -f {shlex.quote(module_path)}/rsyncd-{i}.pid ]; then "
+            #f"kill -9 $(cat {shlex.quote(module_path)}/rsyncd-{i}.pid) 2>/dev/null; then "
             f"  echo 'stopping existing rsync daemon from pid file'; "
-            f"  kill $(cat {shlex.quote(module_path)}/rsyncd{i}.pid) 2>/dev/null || true; "
+            f"  kill $(cat {shlex.quote(module_path)}/rsyncd-{i}.pid) 2>/dev/null || true; "
             f"  sleep 1; "
             f"fi; "
             f"rm -f "
-            f"{shlex.quote(module_path)}/rsyncd{i}.pid "
-            f"{shlex.quote(module_path)}/rsyncd{i}.conf "
-            f"{shlex.quote(module_path)}/rsyncd{i}.lock; ",
+            f"{shlex.quote(module_path)}/rsyncd-{i}.pid "
+            f"{shlex.quote(module_path)}/rsyncd-{i}.conf "
+            f"{shlex.quote(module_path)}/rsyncd-{i}.lock; ",
             localhost=cfg.localhost
         )
 
@@ -56,15 +55,13 @@ def start_rsync_daemon_gst(
     for i, stream_id in enumerate(stream_ids):
         cp = popen_subprocess(
             src_host, None,
-            f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(module_path)} && "
-
-            f"cat > {shlex.quote(module_path)}/rsyncd{i}.conf <<'EOF'\n"
+            f"cat > {shlex.quote(module_path)}/rsyncd-{i}.conf <<'EOF'\n"
             f"use chroot = no\n"
             f"max connections = 64\n"
-            f"pid file = {module_path}/rsyncd{i}.pid\n"
-            #f"log file = {module_path}/rsyncd{i}.log\n"
-            f"log file = {shlex.quote(out_dir)}/rsyncd{i}.log\n"
-            f"lock file = {module_path}/rsyncd{i}.lock\n"
+            f"pid file = {module_path}/rsyncd-{i}.pid\n"
+            #f"log file = {module_path}/rsyncd-{i}.log\n"
+            f"log file = {shlex.quote(out_dir)}/rsyncd-{i}.log\n"
+            f"lock file = {module_path}/rsyncd-{i}.lock\n"
             f"timeout = 0\n"
             f"\n"
             f"[{module_name}{i}]\n"
@@ -74,8 +71,8 @@ def start_rsync_daemon_gst(
             f"EOF\n"
 
             f"globus-streams-launch -p {start_port + (i * 2)} {shlex.quote(stream_id)} "
-            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd{i}.conf --port={start_port + (i * 2)} "
-            f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-daemon{i}.log; ",
+            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd-{i}.conf --port={start_port + (i * 2)} "
+            f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-daemon-{i}.log; ",
             localhost=cfg.localhost,
             #timeout=timeout,
         )
@@ -104,9 +101,9 @@ def start_rsync_transfer_gst(
         logging.debug("RSYNC URL: %s", str(rsync_url))
         cp = popen_subprocess(
             dst_host, None, 
-            f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+            f'sleep {parallel - i}; '
             f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}{i}-time.log "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "
             f"globus-streams-launch {shlex.quote(stream_id)} "  
             f"rsync -avvv --info=progress2,stats2 --no-compress --no-checksum "
             f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
@@ -132,11 +129,9 @@ def start_rsync_transfer_gst(
 #-------------------------------------------------------------------------------
 # Rsync Base
 def start_rsync_daemon_base(
-    cfg: Config, src_host: str,
-    start_port: int, stream_ids: Sequence[str], parallel:int,
-    numa: str, out_dir: str, timeout: int, 
-    app: str, 
-    module_name: str = "transfer", module_path: str = "/tmp/temp_files", check: bool = True,
+    cfg: Config, src_host: str, start_port: int, stream_ids: Sequence[str], parallel:int, 
+    numa: str, out_dir: str, timeout: int, app: str, module_name: str = "transfer", 
+    module_path: str = "/tmp/temp_files", check: bool = True,
 ) -> list[subprocess.Popen[str]]:
 
     if not (len(stream_ids) == parallel):
@@ -145,15 +140,12 @@ def start_rsync_daemon_base(
     for i, stream_id in enumerate(stream_ids):
         cp = popen_subprocess(
             src_host, None,
-            f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(module_path)} && "
-
-            f"cat > {shlex.quote(module_path)}/rsyncd{i}.conf <<'EOF'\n"
+            f"cat > {shlex.quote(module_path)}/rsyncd-{i}.conf <<'EOF'\n"
             f"use chroot = no\n"
             f"max connections = 64\n"
-            f"pid file = {module_path}/rsyncd{i}.pid\n"
-            #f"log file = {module_path}/rsyncd{i}.log\n"
-            f"log file = {shlex.quote(out_dir)}/rsyncd{i}.log\n"
-            f"lock file = {module_path}/rsyncd{i}.lock\n"
+            f"pid file = {module_path}/rsyncd-{i}.pid\n"
+            f"log file = {shlex.quote(out_dir)}/rsyncd-{i}.log\n"
+            f"lock file = {module_path}/rsyncd-{i}.lock\n"
             f"timeout = 0\n"
             f"\n"
             f"[{module_name}{i}]\n"
@@ -161,9 +153,9 @@ def start_rsync_daemon_base(
             f"    read only = false\n"
             f"    list = yes\n"
             f"EOF\n"
-        
-            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd{i}.conf --port={start_port + (i * 2)} "
-            f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-daemon{i}.log; ",
+
+            f"rsync --daemon -vvv --config={shlex.quote(module_path)}/rsyncd-{i}.conf --port={start_port + (i * 2)} "
+            f"--log-file={shlex.quote(out_dir)}/{shlex.quote(app)}-daemon-{i}.log; ",
             localhost=cfg.localhost,
             #timeout=timeout,
         )
@@ -191,9 +183,9 @@ def start_rsync_transfer_base(
         logging.debug("RSYNC URL: %s", str(rsync_url))
         cp = popen_subprocess(
             dst_host, None, 
-            f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+            f'sleep {parallel - i}; '
             f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}{i}-time.log "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "
             f"rsync -avvv --info=progress2,stats2 --no-compress --no-checksum "
             f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
             f"{shlex.quote(rsync_url)} {shlex.quote(module_path)}/{shlex.quote(files[i])} "
@@ -235,9 +227,9 @@ def start_rsync_ssh(
         cp = popen_subprocess(
             #src_host, None,
             dst_host, None,
-            f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+            f'sleep {parallel - i}; '
             f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
-            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync_ssh{i}-time.log "
+            f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/rsync_ssh-{i}-time.log "
             f"rsync -avvv --info=progress2,stats2 --mkpath --no-compress --no-checksum "
             f"--whole-file --ignore-times --inplace --preallocate --numeric-ids "
             ##f"{shlex.quote(file_path)} "

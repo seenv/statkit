@@ -116,7 +116,10 @@ def _check_proxy_config(cfg, stream_uid):
 
 # -------------------------------------------------------------------------------
 # S2CS
-def start_s2cs(cfg: Config, host: str, listener_ip: str, sync_port: int, port_range: str, timeout: int, scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True) -> None:
+def start_s2cs(
+    cfg: Config, host: str, listener_ip: str, sync_port: int, port_range: str, 
+    timeout: int, scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True
+) -> None:
     # have to run s2cs with timeout since it creates a zombie, and without timeout
     # the zombie process will remain and won't let the transfer to happen!!!
     # figure out why and how to fix it!?
@@ -182,8 +185,9 @@ def inbound(
 # -------------------------------------------------------------------------------
 # Outbound connection on Initiator EP
 def outbound(
-    cfg: Config, host: str, stream_uid: str, remote_ip: str, receiver_ap_ip: str, receiver_ports: Sequence[int], s2cs_ip: str, 
-    sync_port: int, parallel: int, timeout: int, scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True,
+    cfg: Config, host: str, stream_uid: str, remote_ip: str, receiver_ap_ip: str, 
+    receiver_ports: Sequence[int], s2cs_ip: str, sync_port: int, parallel: int, 
+    timeout: int, scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True,
 ) -> None:
     #if not stream_uid or not (len(receiver_ports) == parallel):
     #    raise RuntimeError(f"OUTBOUND: Expected all lists to have length parallel={parallel}: {len(receiver_ports)},and a Stream UID: {stream_uid}")
@@ -225,10 +229,8 @@ def outbound(
 # -------------------------------------------------------------------------------
 # Control Service
 def start_scistream(
-    cfg: Config, encrypt: int,
-    parallel: int, timeout: int,
+    cfg: Config, encrypt: int, parallel: int, timeout: int,
 ) -> tuple[list[str], list[int], list[int], list[int], list[int]]:
-#) -> tuple[Optional[str], Sequence[str]]:
     if encrypt:
         _replace_haproxy_cfg(cfg, 'haproxy.cfg.j2_encr')
     else:

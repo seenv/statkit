@@ -30,18 +30,9 @@ def cleanup_iperf(cfg: Config, check: bool = True) -> None:
 # -------------------------------------------------------------------------------
 # iPerf3 GST
 def start_iperf_server(
-    cfg: Config, 
-    host: str,
-    start_port: int,
-    stream_ids: Sequence[str],
-    parallel: int, 
-    numa: str,
-    out_dir: str, 
-    app: str, 
-    files: list[str],
-    timeout: int, 
-    temp_dir: str = "/tmp/temp_files",
-    retries: int = 100,
+    cfg: Config, host: str, start_port: int, stream_ids: Sequence[str],
+    parallel: int, numa: str, out_dir: str, app: str, files: list[str],
+    timeout: int, temp_dir: str = "/tmp/temp_files", retries: int = 100,
     check: bool = True,
 ) -> list[subprocess.Popen[str]]:
     if not (len(stream_ids) == parallel):
@@ -62,7 +53,9 @@ def start_iperf_server(
         # )
         cp = popen_subprocess(
             host, cfg.remote_env,
-            f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
+            
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
             f"globus-streams-launch -p {start_port + (i * 2)} {shlex.quote(stream_id)} "                                    #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -s -p {start_port + (i * 2)} -1 --timestamps --forceflush "                      #f"iperf3 -s -B {cfg.listener_ip} -p {port} -1 --timestamps  --forceflush "
@@ -78,18 +71,17 @@ def start_iperf_server(
 
 
 def start_iperf_client(
-    cfg: Config, host: str, 
-    stream_ids: Sequence[str], listen_ports: Sequence[int],
+    cfg: Config, host: str, stream_ids: Sequence[str], listen_ports: Sequence[int],
     parallel: int, numa: str, arg: int, file: str, app: str, out_dir: str, timeout: int, 
-    temp_dir: str = "/tmp/temp_files",
-    retries: int = 100,
-    check: bool = True,
+    temp_dir: str = "/tmp/temp_files", retries: int = 100, check: bool = True,
 ) -> list[subprocess.CompletedProcess[str]]:
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"IGST: Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
     
     processes, results = [], []
-    duration, throughput, bytes_transferred, retransmissions = 0, 0, 0, 0
+    sent_duration, sent_throughput, sent_bytes_transferred, sent_retransmissions = 0, 0, 0, 0
+    recv_duration, recv_throughput, recv_bytes_transferred = 0, 0, 0
+
     size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
     chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
 
@@ -98,8 +90,9 @@ def start_iperf_client(
         extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
         cp = popen_subprocess(
             host, cfg.remote_env,
-            f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-            
+            #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
+            f'sleep {parallel - i}; '
             f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
             
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
@@ -110,22 +103,21 @@ def start_iperf_client(
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             
+            f'echo $? > {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}; '
             f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
             f"}} 2>&1 | tr '\\r' '\\n' "
             f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
-            f"| tee {shlex.quote(out_dir)}/{shlex.quote(app)}.log; "
+            f"> {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.log; "
             
-            f"rc=$?; "
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
             f"sleep 1; "
-            f"exit $rc ",
+            f'exit $(cat {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}) ',
             localhost=cfg.localhost,
         )
         processes.append((cp, listen_port))
-    
-    # for cp, listen_port in processes:
-    #     stdout, stderr = cp.communicate()
-    #     results.append((listen_port, stdout, stderr, cp.returncode))
+        #logging.debug("ISCI: Started iperf3 client on port %d on host %s", (initiate_ap_ports[i]), host.upper())
+        time.sleep(1)
+
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
         time.sleep(cfg.sleep)
@@ -134,6 +126,7 @@ def start_iperf_client(
     for listen_port, stdout, stderr, returncode in results:
         if returncode != 0:
             logging.error("IGST: Process on port %s failed with return code %s: %s", listen_port, returncode, stderr)
+            raise RuntimeError()
 
         try:
             end = json.loads(stdout)["end"]
@@ -145,9 +138,8 @@ def start_iperf_client(
             recv_bits_per_second = recv["bits_per_second"]
             # per_stream = [(s["sender"]["seconds"], s["receiver"]["seconds"]) for s in end["streams"]]
         except (json.JSONDecodeError, KeyError) as e:
-            logging.error("IGST: No parseable summary on port %s (rc=%s): %s\n%s",
-                        listen_port, returncode, e, stdout[-2000:])
-            continue
+            logging.error("IGST: No parseable summary on port %s (rc=%s): %s\n%s", listen_port, returncode, e, stdout[-1500:])
+            raise RuntimeError()
 
         logging.debug("SENT: Gbps: %.6f | Sec: %.2f | Size: %.4f | Retrans: %s ", sent_bits_per_second / 1e9, sent_seconds, sent_bytes / 1e9, sent_retransmits)
         logging.debug("RECV: Gbps: %.6f | Sec: %.2f | Size: %.4f", recv_bits_per_second / 1e9, recv_seconds, recv_bytes / 1e9)
@@ -169,18 +161,9 @@ def start_iperf_client(
 #-------------------------------------------------------------------------------
 # iPerf3 Base
 def start_iperf_server_base(
-    cfg: Config, 
-    host: str,
-    start_port: int,
-    stream_ids: Sequence[str],
-    parallel: int, 
-    numa: str,
-    out_dir: str, 
-    app: str, 
-    files: list[str],
-    timeout: int, 
-    temp_dir: str = "/tmp/temp_files",
-    retries: int = 100,
+    cfg: Config, host: str, start_port: int, stream_ids: Sequence[str],
+    parallel: int, numa: str, out_dir: str, app: str, files: list[str],
+    timeout: int, temp_dir: str = "/tmp/temp_files", retries: int = 100,
     check: bool = True,
 ) -> list[subprocess.Popen[str]]:
     if not (len(stream_ids) == parallel):
@@ -201,7 +184,9 @@ def start_iperf_server_base(
         # )
         cp = popen_subprocess(
             host, None,
-            f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
+            
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "                #f"numactl --cpunodebind=1 --preferred=1 "
             f"iperf3 -s -p {start_port + (i * 2)} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
             f"{extra_arg} "
@@ -216,41 +201,51 @@ def start_iperf_server_base(
 
 
 def start_iperf_client_base(
-    cfg: Config, host: str, 
-    listener_pub: str, 
-    stream_ids: Sequence[str], listen_ports: Sequence[int],
-    parallel: int, numa: str, arg: int, 
-    file: str, 
-    app: str,  out_dir: str, timeout: int, 
-    temp_dir: str = "/tmp/temp_files",
-    retries: int = 100,
-    check: bool = True,
+    cfg: Config, host: str, listener_pub: str, stream_ids: Sequence[str], 
+    listen_ports: Sequence[int], parallel: int, numa: str, arg: int, 
+    file: str,  app: str,  out_dir: str, timeout: int, 
+    temp_dir: str = "/tmp/temp_files", retries: int = 100, check: bool = True,
 ) -> list[subprocess.CompletedProcess[str]]:
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"IBASE: Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
 
-    processes,results = [], []
-    duration, throughput, bytes_transferred, retransmissions = 0, 0, 0, 0
+    processes, results = [], []
+    sent_duration, sent_throughput, sent_bytes_transferred, sent_retransmissions = 0, 0, 0, 0
+    recv_duration, recv_throughput, recv_bytes_transferred = 0, 0, 0
+    
     size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
     chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
+
     for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
         file_size = chunk_size + (1 if i < remainder else 0)
         extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
         cp = popen_subprocess(
             host, None,
-            f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
+            f'sleep {parallel - i}; '
+            f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
+            
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
-            f"iperf3 -c {listener_pub} -p {listen_port} "                                                      #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
+            f"iperf3 -c {listener_pub} -p {listen_port} "                                                #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
             f"-Z -R -P 1 --timestamps --forceflush "
             f"{extra_arg} "
-            f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
-            f"rc=$?; "
+            f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "            
+                        
+            f'echo $? > {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}; '
+            f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
+            f"}} 2>&1 | tr '\\r' '\\n' "
+            f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
+            f"> {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.log; "
+
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
             f"sleep 1; "
-            f"exit $rc ",
+            f'exit $(cat {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}) ',
             localhost=cfg.localhost,
         )
         processes.append((cp, listen_port))
+        #logging.debug("ISCI: Started iperf3 client on port %d on host %s", (initiate_ap_ports[i]), host.upper())
+        time.sleep(1)
 
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
@@ -259,7 +254,7 @@ def start_iperf_client_base(
             
     for listen_port, stdout, stderr, returncode in results:
         if returncode != 0:
-            logging.error("IBASE: Process on port %s failed with return code %s: %s", listen_port, returncode, stderr)
+            raise RuntimeError("IBASE: Process on port %s failed with return code %s: %s", listen_port, returncode, stderr)
 
         try:
             end = json.loads(stdout)["end"]
@@ -271,9 +266,7 @@ def start_iperf_client_base(
             recv_bits_per_second = recv["bits_per_second"]
             # per_stream = [(s["sender"]["seconds"], s["receiver"]["seconds"]) for s in end["streams"]]
         except (json.JSONDecodeError, KeyError) as e:
-            logging.error("IBASE: No parseable summary on port %s (rc=%s): %s\n%s",
-                        listen_port, returncode, e, stdout[-2000:])
-            continue
+            raise RuntimeError("IBASE: No parseable summary on port %s (rc=%s): %s\n%s", listen_port, returncode, e, stdout[-1500:])
 
         logging.debug("SENT: Gbps: %.6f | Sec: %.2f | Size: %.4f | Retrans: %s ", sent_bits_per_second / 1e9, sent_seconds, sent_bytes / 1e9, sent_retransmits)
         logging.debug("RECV: Gbps: %.6f | Sec: %.2f | Size: %.4f", recv_bits_per_second / 1e9, recv_seconds, recv_bytes / 1e9)
@@ -295,18 +288,9 @@ def start_iperf_client_base(
 #-------------------------------------------------------------------------------
 # iPerf3 SciStream
 def start_iperf_server_scistream(
-    cfg: Config, 
-    host: str,
-    listen_ep_ports: Sequence[int],
-    stream_ids: Sequence[str],
-    parallel: int, 
-    numa: str,
-    out_dir: str, 
-    app: str, 
-    files: list[str],
-    timeout: int, 
-    temp_dir: str = "/tmp/temp_files",
-    retries: int = 100,
+    cfg: Config, host: str, listen_ep_ports: Sequence[int], stream_ids: Sequence[str],
+    parallel: int, numa: str, out_dir: str, app: str, files: list[str],
+    timeout: int, temp_dir: str = "/tmp/temp_files", retries: int = 100,
     check: bool = True,
 ) -> list[subprocess.Popen[str]]:
     if not (len(stream_ids) == parallel):
@@ -326,7 +310,9 @@ def start_iperf_server_scistream(
         # )
         cp = popen_subprocess(
             host, None,
-            f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
+            
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "                #f"numactl --cpunodebind=1 --preferred=1 "
             f"iperf3 -s -p {listen_port} -1 --timestamps --forceflush "                                     #f"iperf3 -s -p {start_ports[i]} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "   f"iperf3 -s -p {listen_ep_ports[i]} -1 --timestamps --forceflush "
             f"{extra_arg} "
@@ -336,22 +322,15 @@ def start_iperf_server_scistream(
             f"exit $rc ",
             localhost=cfg.localhost,
         )
-        #logging.info("ISCI: Started iperf3 server on %s", host.upper())
         processes.append(cp)
         logging.debug("ISCI: Started iperf3 server on port %d on host %s", (listen_ep_ports[i]), host.upper())
 
 
 def start_iperf_client_scistream(
-    cfg: Config, host: str, 
-    listener_pub: str, 
-    stream_ids: Sequence[str], 
-    initiate_ap_ports: Sequence[int],
-    parallel: int, numa: str, arg: int, 
-    file: str, 
-    app: str,  out_dir: str, timeout: int, 
-    temp_dir: str = "/tmp/temp_files",
-    retries: int = 100,
-    check: bool = True,
+    cfg: Config, host: str, listener_pub: str, stream_ids: Sequence[str], 
+    initiate_ap_ports: Sequence[int], parallel: int, numa: str, 
+    arg: int, file: str, app: str,  out_dir: str, timeout: int, 
+    temp_dir: str = "/tmp/temp_files",retries: int = 100, check: bool = True,
 ) -> list[subprocess.CompletedProcess[str]]:
     if not (len(initiate_ap_ports) == parallel):
         raise RuntimeError(f"ISCI: Expected all lists to have length parallel={parallel}, but got listen ports={len(initiate_ap_ports)}")
@@ -362,27 +341,38 @@ def start_iperf_client_scistream(
     
     size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
     chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
+
     for i, (listen_port, stream_id) in enumerate(zip(initiate_ap_ports, stream_ids, strict=True)):
         file_size = chunk_size + (1 if i < remainder else 0)
         extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
-        #cp = run_subprocess(
         cp = popen_subprocess(
             host, None,
-            f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
+            #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
+            f'sleep {parallel - i}; '
+            f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
+
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -c {listener_pub} -p {listen_port} "                                                #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} " #f"iperf3 -c 128.135.164.120 -p 5100 "
             f"-Z -R -P 1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
-            f"rc=$?; "
+            
+            f'echo $? > {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}; '
+            f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
+            f"}} 2>&1 | tr '\\r' '\\n' "
+            f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
+            f"> {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.log; "
+
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
             f"sleep 1; "
-            f"exit $rc ",
+            f'exit $(cat {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}) ',
             localhost=cfg.localhost,
         )
         processes.append((cp, listen_port))
         logging.debug("ISCI: Started iperf3 client on port %d on host %s", (initiate_ap_ports[i]), host.upper())
-    #time.sleep(int(arg)+int(cfg.sleep)*2)
+        time.sleep(1)
+
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
         time.sleep(cfg.sleep)
@@ -390,7 +380,7 @@ def start_iperf_client_scistream(
             
     for listen_port, stdout, stderr, returncode in results:
         if returncode != 0:
-            logging.error("ISCI: Process on port %s failed with return code %s: %s", listen_port, returncode, stderr)
+            raise RuntimeError("ISCI: Process on port %s failed with return code %s: %s", listen_port, returncode, stderr)
 
         try:
             end = json.loads(stdout)["end"]
@@ -402,9 +392,7 @@ def start_iperf_client_scistream(
             recv_bits_per_second = recv["bits_per_second"]
             # per_stream = [(s["sender"]["seconds"], s["receiver"]["seconds"]) for s in end["streams"]]
         except (json.JSONDecodeError, KeyError) as e:
-            logging.error("ISCI: No parseable summary on port %s (rc=%s): %s\n%s",
-                        listen_port, returncode, e, stdout[-2000:])
-            continue
+            raise RuntimeError("ISCI: No parseable summary on port %s (rc=%s): %s\n%s", listen_port, returncode, e, stdout[-1500:])
 
         logging.debug("SENT: Gbps: %.6f | Sec: %.2f | Size: %.4f | Retrans: %s ", sent_bits_per_second / 1e9, sent_seconds, sent_bytes / 1e9, sent_retransmits)
         logging.debug("RECV: Gbps: %.6f | Sec: %.2f | Size: %.4f", recv_bits_per_second / 1e9, recv_seconds, recv_bytes / 1e9)

@@ -44,8 +44,6 @@ def get_collection_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
     return out
 
 
-
-
 #task_id="$(globus transfer $source_ep $dest_ep     --jmespath 'task_id' --format=UNIX     --batch my_file_batch.txt)"
 # echo "Waiting on 'globus transfer' task '$task_id'"
 # globus task wait "$task_id" --timeout 30
@@ -77,7 +75,8 @@ def start_globus_transfer(
         files_list = f"{shlex.quote(src_cid)}:{shlex.quote(files[0])} {shlex.quote(dst_cid)}:{shlex.quote(files[0])} "
     cp = run_subprocess(
         cfg.localhost, None,
-        f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+        #f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+        f'sleep {parallel - i}; '
         f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
         f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-time.log "
         f"globus transfer -v  {files_list} --label {shlex.quote(label)} {extra_arg} "
@@ -116,7 +115,7 @@ def start_globus_transfer_multiple(
         transfer_label = f"{label}-file{i}"
         cp = popen_subprocess(
             cfg.localhost, None,
-            f"set +x; mkdir -p {shlex.quote(out_dir)} && "
+            f'sleep {parallel - i}; '
             f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
             f"/usr/bin/time -vvv "
             f"-o {shlex.quote(out_dir)}/{shlex.quote(app)}{i}-time.log "

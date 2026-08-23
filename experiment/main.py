@@ -23,6 +23,12 @@ def main() -> None:
 
         #log_path = log_dir / f"{datetime.now().strftime('%m-%d-%H-%M')}.log"
         log_path = log_dir / f"{test_name}.log"
+
+        # Separate this run from the previous run
+        if log_path.exists() and log_path.stat().st_size > 0:
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write("\n------------------------------------------------------------------------------------------------------------\n" * 10)
+
         setup_logging(cfg.verbose, str(log_path))
         logging.info("MAIN: Command: %s", shlex.join(sys.argv))
         logging.info("MAIN: Host: %s | User: %s | CWD: %s | PID: %s", socket.gethostname(), getpass.getuser(), os.getcwd(), os.getpid())
@@ -80,7 +86,7 @@ def main() -> None:
             except Exception:
                 logging.exception("MAIN: File cleanup failed for %s", cfg.test)
             if cfg != configs[-1]:
-                logging.info("MAIN: Sleeping for 60 seconds before the next test")
+                print("MAIN: Sleeping for 30 seconds before the next test")
                 time.sleep(30)
 
     if failures:

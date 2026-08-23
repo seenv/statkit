@@ -139,11 +139,27 @@ def make_file(cfg: Config, parallel: int, arg: int, files: list[str], file_path:
             f"du -h {shlex.quote(file_path)}/{shlex.quote(file_name)} ",
             localhost=cfg.localhost,
         )
-    logging.debug("FILE: Source file on %s: %s", host.upper(), cp.stdout.strip())
+    logging.debug("FILE: Created the source file(s) on %s: %s", host.upper(), cp.stdout.strip())
+
+
+def create_output_dir(cfg: Config, output_dir: str, timeout: int):
+    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+    for host in hosts:
+        cp = run_subprocess(
+            host, None,
+            f"mkdir -p {shlex.quote(output_dir)} && "
+            f"rm -f {shlex.quote(output_dir)}/* && "
+            # f"find {shlex.quote(out_dir)} -mindepth 1 -delete && "
+            f'ls {shlex.quote(output_dir)} ',
+            localhost=cfg.localhost,
+            timeout=timeout,
+        )
+        logging.debug("DIR: Creating and cleaning up the test directory on host: %s: %s", host.upper(), cp.stdout)
+    logging.info("DIR: Created the test directory on the hosts")
 
 
 def cleanup_file(cfg: Config, file_path: str = "/tmp/temp_files") -> None:
-    hosts = cfg.hosts.ep.values()
+    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
         #for file_name in files:
         cp = run_subprocess(
@@ -152,7 +168,8 @@ def cleanup_file(cfg: Config, file_path: str = "/tmp/temp_files") -> None:
             #f"du -h {shlex.quote(file_path)}/ || true ",
             localhost=cfg.localhost,
         )
-    logging.debug("FILE: Cleaning up the temp files on %s: %s", host.upper(), cp.stdout.strip())
+        logging.debug("FILE: Cleaning up the temp files on %s: %s", host.upper(), cp.stdout.strip())
+    logging.info("FILE: Cleaned up the temp files")
 
 
 def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
