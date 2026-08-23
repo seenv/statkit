@@ -103,7 +103,7 @@ def start_iperf_client(
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             
-            f'echo $? > {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}; '
+            # f'echo $? > {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}; '
             f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
             f"}} 2>&1 | tr '\\r' '\\n' "
             f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
@@ -111,7 +111,7 @@ def start_iperf_client(
             
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
             f"sleep 1; "
-            f'exit $(cat {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}) ',
+            f'', # f'exit $(cat {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}) ',
             localhost=cfg.localhost,
         )
         processes.append((cp, listen_port))
@@ -232,7 +232,7 @@ def start_iperf_client_base(
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "            
                         
-            f'echo $? > {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}; '
+            # f'echo $? > {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}; '
             f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
             f"}} 2>&1 | tr '\\r' '\\n' "
             f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
@@ -240,7 +240,7 @@ def start_iperf_client_base(
 
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
             f"sleep 1; "
-            f'exit $(cat {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}) ',
+            f'', # f'exit $(cat {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}) ',
             localhost=cfg.localhost,
         )
         processes.append((cp, listen_port))
@@ -358,7 +358,7 @@ def start_iperf_client_scistream(
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             
-            f'echo $? > {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}; '
+            # f'echo $? > {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}; '
             f"echo \"END $(date '+%Y-%m-%d %H:%M:%S')\"; "
             f"}} 2>&1 | tr '\\r' '\\n' "
             f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
@@ -366,7 +366,7 @@ def start_iperf_client_scistream(
 
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
             f"sleep 1; "
-            f'exit $(cat {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}) ',
+            f'', # f'exit $(cat {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}) ',
             localhost=cfg.localhost,
         )
         processes.append((cp, listen_port))
