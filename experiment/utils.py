@@ -158,6 +158,36 @@ def create_output_dir(cfg: Config, output_dir: str, timeout: int):
     logging.info("DIR: Created the test directory on the hosts")
 
 
+def initial_cleanup(
+    cfg, timeout: int = 30, check: bool = True,
+):
+    hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+    for host in hosts:
+        cp = run_subprocess(
+            host, None,
+            f'pkill -TERM -x haproxy || true; '
+            f'pkill -TERM -x stunnel || true; '
+            f'pkill -TERM -x nginx || true; '
+            f'pkill -TERM -x s2cs || true; '
+            f'pkill -TERM -x s2uc || true; '
+            
+            f'pkill -TERM -x iperf3 || true; '
+            f'pkill -TERM -x rsync || true; '
+            
+            r'pkill -TERM -f "monitor/launcher\.py" || true; '
+            f'docker ps -q | xargs -r docker stop; '
+            f'docker ps -aq | xargs -r docker rm; ',
+            localhost=cfg.localhost,
+            timeout=timeout,
+        )
+        if check and cp.returncode != 0:
+            raise RuntimeError(
+                f"INITCLN: Failed initial node's cleaning up the reports on {host.upper()}"
+                f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            )
+    logging.info("INITCLN: Finish initial nodes cleanup")
+
+
 def cleanup_file(cfg: Config, file_path: str = "/tmp/temp_files") -> None:
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
@@ -172,14 +202,14 @@ def cleanup_file(cfg: Config, file_path: str = "/tmp/temp_files") -> None:
     logging.info("FILE: Cleaned up the temp files")
 
 
-def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
-    dest_dir = str(PurePosixPath(dest_path).parent)
-    run_subprocess(
-        host, None,
-        f"mkdir -p {shlex.quote(dest_dir)} ", #&& ",
-        localhost=cfg.localhost,
-    )
-    logging.debug("RSYNC: Prepared destination on %s: file=%s", host.upper(), dest_path)
+# def prepare_remote_dest(cfg: Config, host: str, dest_path: str) -> None:
+#     dest_dir = str(PurePosixPath(dest_path).parent)
+#     run_subprocess(
+#         host, None,
+#         f"mkdir -p {shlex.quote(dest_dir)} ", #&& ",
+#         localhost=cfg.localhost,
+#     )
+#     logging.debug("RSYNC: Prepared destination on %s: file=%s", host.upper(), dest_path)
 
 
 def copy_results(cfg, check: bool = True) -> None:

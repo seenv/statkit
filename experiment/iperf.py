@@ -61,9 +61,9 @@ def start_iperf_server(
             f"iperf3 -s -p {start_port + (i * 2)} -1 --timestamps --forceflush "                      #f"iperf3 -s -B {cfg.listener_ip} -p {port} -1 --timestamps  --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
-            f"rc=$?; "
+            # f"rc=$?; "
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
-            f"exit $rc ",
+            f'',    # f"exit $rc ",
             localhost=cfg.localhost,
         )
         processes.append(cp)
@@ -85,7 +85,8 @@ def start_iperf_client(
     size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
     chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
 
-    for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
+    for i, (listen_port, stream_id) in enumerate(zip(reversed(listen_ports), reversed(stream_ids), strict=True)):
+    # for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
         file_size = chunk_size + (1 if i < remainder else 0)
         extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
         cp = popen_subprocess(
@@ -191,9 +192,9 @@ def start_iperf_server_base(
             f"iperf3 -s -p {start_port + (i * 2)} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
-            f"rc=$?; "
+            # f"rc=$?; "
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
-            f"exit $rc ",
+            f'',    # f"exit $rc ",
             localhost=cfg.localhost,
         )
         processes.append(cp)
@@ -216,7 +217,7 @@ def start_iperf_client_base(
     size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
     chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
 
-    for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
+    for i, (listen_port, stream_id) in enumerate(zip(reversed(listen_ports), reversed(stream_ids), strict=True)):
         file_size = chunk_size + (1 if i < remainder else 0)
         extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
         cp = popen_subprocess(
@@ -317,9 +318,9 @@ def start_iperf_server_scistream(
             f"iperf3 -s -p {listen_port} -1 --timestamps --forceflush "                                     #f"iperf3 -s -p {start_ports[i]} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "   f"iperf3 -s -p {listen_ep_ports[i]} -1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
-            f"rc=$?; "
+            # f"rc=$?; "
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
-            f"exit $rc ",
+            f'',    # f"exit $rc ",
             localhost=cfg.localhost,
         )
         processes.append(cp)
@@ -342,7 +343,7 @@ def start_iperf_client_scistream(
     size = parse_size_to_bytes(arg) if cfg.test == "transfer" else 0
     chunk_size, remainder = divmod(size, parallel) if size else (0, 0)
 
-    for i, (listen_port, stream_id) in enumerate(zip(initiate_ap_ports, stream_ids, strict=True)):
+    for i, (listen_port, stream_id) in enumerate(zip(reversed(initiate_ap_ports), reversed(stream_ids), strict=True)):
         file_size = chunk_size + (1 if i < remainder else 0)
         extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
         cp = popen_subprocess(

@@ -53,7 +53,7 @@ def _parse_proxy_list(s: str) -> list[str]:
     return proxies
 
 def _parse_app_list(s: str) -> list[str]:
-    valid_apps = {"iperf", "ibase", "sperf", "rsync", "rbase", "gtr", "mini", "mbase"}
+    valid_apps = {"iperf", "ibase", "sperf", "rsync", "rbase", "ssync", "gtr", "mini", "mbase"}
     apps = _parse_str_list(s)
     invalid = sorted(set(apps) - valid_apps)
     if invalid:
@@ -295,22 +295,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initiator-ap-ip", default=None, help="Initiator Ap Private IP address")
     parser.add_argument("--initiator-ap-pub", default=None, help="Initiator Ap Public IP address (accessible by Listener EP)")
 
-    parser.add_argument("--tunnel-port", type=int, default=51000)
-    parser.add_argument("--encrypt-port", type=int, default=51015)
-    parser.add_argument("--direct-port", type=int, default=51030)
-    parser.add_argument("--rsync-port", type=int, default=51045)
-    parser.add_argument("--mini-port", type=int, default=51060)
-    parser.add_argument("--mbase-port", type=int, default=51075)
-    parser.add_argument("--scisync-port", type=int, default=51100)
+    parser.add_argument("--tunnel-port", type=int, default=5000)
+    parser.add_argument("--encrypt-port", type=int, default=5100)
+    parser.add_argument("--direct-port", type=int, default=5200)
+    parser.add_argument("--rsync-port", type=int, default=5300)
+    parser.add_argument("--mini-port", type=int, default=5400)
+    parser.add_argument("--mbase-port", type=int, default=5500)
+    parser.add_argument("--scisync-port", type=int, default=5600)
     #parser.add_argument("--inbound-ports", type=_parse_int_list, default=[51115,51116,51117,51118,51119])
     #parser.add_argument("--outbound-ports", type=_parse_int_list, default=[51130,51131,51132,51133,51134])
-    parser.add_argument("--inbound-ports", type=_parse_int_list, default=[51115])
-    parser.add_argument("--outbound-ports", type=_parse_int_list, default=[51130])
+    parser.add_argument("--inbound-ports", type=_parse_int_list, default=[5700])
+    parser.add_argument("--outbound-ports", type=_parse_int_list, default=[5800])
     parser.add_argument("--tomo-file", type=str, default="tomo_00058_all_subsampled1p_s1079s1081.h5", choices=["tomo_00058_all_subsampled1p_s1079s1081.h5", "tomo_00058.h5"])
 
     parser.add_argument("--sleep", type=int, default=5)
 
-    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,sperf,rsync,rbase,gtr,mini,mbase")
+    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,sperf,rsync,rbase,ssync,gtr,mini,mbase")
     parser.add_argument("--encrypt", action="store_true", help="Enabling encryption and disabling the splice")
     #parser.add_argument("--splice", type=_parse_int_list, help="Splice option, 0: disable, 1: enable")
     parser.add_argument("--splice", type=_parse_int_list, default=None, help="Splice option, 0: disable, 1: enable")

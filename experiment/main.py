@@ -8,7 +8,7 @@ import time
 from config import get_configs
 from launcher import experiment_main
 from utils import setup_logging, send_ntfy, cleanup_file
-from utils import copy_results
+from utils import initial_cleanup, copy_results
 import getpass, socket, os, sys, shlex
 
 def main() -> None:
@@ -20,9 +20,7 @@ def main() -> None:
         test_name = Path(cfg.report_dir).name
         log_dir = Path.home() / "Projects" / "globus_stream" / "statkit" / "results" / "reports" / cfg.lease.lower() / cfg.test / test_name
         log_dir.mkdir(parents=True, exist_ok=True)
-
-        #log_path = log_dir / f"{datetime.now().strftime('%m-%d-%H-%M')}.log"
-        log_path = log_dir / f"{test_name}.log"
+        log_path = log_dir / f"{test_name}.log"     #log_path = log_dir / f"{datetime.now().strftime('%m-%d-%H-%M')}.log"
 
         # Separate this run from the previous run
         if log_path.exists() and log_path.stat().st_size > 0:
@@ -35,6 +33,8 @@ def main() -> None:
         logging.info("MAIN: Python: %s", sys.version.split()[0])
         try:
             logging.info("MAIN: Starting the experiment at %s. Log file: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), log_path)
+            initial_cleanup(cfg)
+            time.sleep(cfg.sleep)
             experiment_main(cfg)
 
         except Exception as exc:

@@ -310,7 +310,7 @@ def stop_scistream(
             #f'pkill -TERM -f "[s]2cs" || true; '
             #f'sudo pkill -TERM -f "[s]tunnel" || true; '
             #f'sudo pkill -TERM -f "[h]aproxy" || true; ',
-            f'pkill -TERM -x haproxy || true;',
+            f'pkill -TERM -x haproxy || true; ',
             localhost=cfg.localhost,
         )
         if check and cp.returncode != 0:

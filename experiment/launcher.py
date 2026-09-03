@@ -20,8 +20,10 @@ from scistream import start_scistream, stop_scistream
 from iperf import start_iperf_server, start_iperf_client, start_iperf_server_base, start_iperf_client_base, cleanup_iperf
 from iperf import start_iperf_server_scistream, start_iperf_client_scistream
 
-from rsync import stop_rsync_daemon, start_rsync_daemon_gst
-from rsync import start_rsync_transfer_gst, start_rsync_daemon_base, start_rsync_transfer_base, start_rsync_ssh
+from rsync import stop_rsync_daemon
+from rsync import start_rsync_daemon_gst, start_rsync_transfer_gst
+from rsync import start_rsync_daemon_base, start_rsync_transfer_base, start_rsync_ssh
+from rsync import start_rsync_daemon_sci, start_rsync_transfer_sci
 
 from gtransfer import get_collection_id, start_globus_transfer, start_globus_transfer_multiple
 
@@ -304,6 +306,60 @@ def run_rsync_base(
 
 
 # ------------------------------------------------------------------------------
+# Rsync SciStream
+def run_rsync_scistream(
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, parallel: int, 
+    arg: int, files: list[str], start_port: int, listener_host: str, 
+    initiator_host: str, numa: str, output_dir: str, encrypt: int, app_tag: str,
+) -> None:
+    
+    logging.info("")
+    logging.info("--------------- Tests %d / %d: Starting Rsync Scistream Tests ---------------", idx, total_runs)
+    stream_ids, listen_ports = [], []
+    listen_ip = cfg.initiator_ap_ip
+
+    try:
+        logging.info("RSCI: Creating %d SciStream tunnels ", parallel)
+        stream_ids, listen_ap_ports, initiate_ap_ports, listen_ep_ports, initiate_ep_ports = start_scistream(
+            cfg, encrypt, parallel, timeout
+        )
+
+        if not cfg.is_test:
+            logging.info("RSCI: Starting the statkit monitoring on the hosts")
+            start_statkit(cfg, timeout, app_tag, output_dir)   #size as duration which will be * 60s
+            time.sleep(cfg.sleep)
+        
+        # start rsync daemon
+        logging.info("RSCI: Starting the rsync daemon on the host %s", listener_host.upper())
+        deamon_cps = start_rsync_daemon_sci(
+            cfg, listener_host, listen_ep_ports, stream_ids, parallel, numa,     #cfg, listener_host, listen_ep_ports, stream_ids, parallel, numa, 
+            output_dir, timeout, app_tag, "transfer", "/tmp/temp_files"
+        )
+        time.sleep(cfg.sleep)
+
+        logging.info("RSCI: Starting SciStream rsync transfer")
+        start_rsync_transfer_sci(
+            cfg, listener_host, initiator_host, listen_ip, stream_ids, initiate_ap_ports, 
+            parallel, numa, arg, files, output_dir, timeout, app_tag, "transfer", "/tmp/temp_files"
+        )
+
+        if not cfg.is_test:   
+            logging.info("RSCI: Recording the RTT")
+            record_ping(cfg, initiator_host, cfg.listener_pub, app_tag, output_dir)
+
+    except Exception as e:
+        raise RuntimeError(f"RSCI: Runtime Error: {e}") from e
+
+    finally:
+        # cleanup_iperf(cfg)
+        if not cfg.is_test:
+            logging.info("RSCI: Stopping the statkit monitoring on the hosts")
+            stop_statkit(cfg)
+        stop_rsync_daemon(cfg, listener_host, parallel, "/tmp/temp_files")
+        stop_scistream(cfg)
+
+
+# ------------------------------------------------------------------------------
 # Globus Transfer
 def run_globus_transfer(
     cfg: Config, *, idx: int, total_runs: int, timeout: int, parallel: int, 
@@ -472,6 +528,7 @@ def experiment_main(cfg: Config) -> None:
             "sperf" in cfg.app,
             "rsync" in cfg.app and cfg.test == "transfer",
             "rbase" in cfg.app and cfg.test == "transfer",
+            "ssync" in cfg.app and cfg.test == "transfer",
             "gtr" in cfg.app and cfg.test == "transfer",
             "mini" in cfg.app and cfg.test == "stream",
             "mbase" in cfg.app and cfg.test == "stream",
@@ -580,6 +637,17 @@ def experiment_main(cfg: Config) -> None:
                 test_idx += 1
                 start_port = cfg.rsync_port
                 run_rsync_base(
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    parallel=parallel, arg=arg, files=files, start_port=start_port,
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="rsync_base"
+                )
+                time.sleep(cfg.sleep)
+
+            if 'ssync' in cfg.app and cfg.test == 'transfer':
+                test_idx += 1
+                start_port = cfg.rsync_port
+                run_rsync_scistream(
                     cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
                     parallel=parallel, arg=arg, files=files, start_port=start_port,
                     listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
