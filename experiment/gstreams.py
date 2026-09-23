@@ -84,7 +84,8 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
                 f"GST: Failed getting the stream id on {host.upper()}\n"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
-        out[role] = _parse_gateway_id(cp.stdout + "\n" + cp.stderr, [cfg.lease.capitalize(), role.capitalize()], exact=False)
+        #out[role] = _parse_gateway_id(cp.stdout + "\n" + cp.stderr, [cfg.lease.capitalize(), role.capitalize()], exact=False)
+        out[role] = _parse_gateway_id(cp.stdout + "\n" + cp.stderr, [cfg.lease.capitalize(), ], exact=False)
         logging.debug("GST: Stream Gateway id on %s %s", host.upper(), cp.stdout.strip())
     missing = {"initiator", "listener"} - set(out.keys())
     if missing:
@@ -231,7 +232,7 @@ def check_gridftp_config(
 def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 100, wait: int = 5) -> tuple[str, str]:
     for ret in range(1, retry + 1):
         cp = run_subprocess(
-            cfg.localhost, cfg.local_env,
+            cfg.localhost, None, #cfg.local_env,
             f"globus streams tunnel show {shlex.quote(tunnel_id)}",
             localhost=cfg.localhost,
             check=False,
@@ -253,7 +254,7 @@ def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 100, wait
 
 def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, lbl: str, timeout: int, check: bool = True) -> str:
     cp = run_subprocess(
-        cfg.localhost, cfg.local_env,
+        cfg.localhost, None, #cfg.local_env,
         "globus streams tunnel create "
         "--lifetime-minutes 3600 -v "
         f"--label {shlex.quote(lbl)} "
@@ -309,7 +310,7 @@ def init_initiator_env(cfg: Config, tunnel_id: str, check: bool = True) -> tuple
 
 def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
     cp = run_subprocess(
-        cfg.localhost, cfg.local_env,
+        cfg.localhost, None, #cfg.local_env,
         f"globus streams tunnel stop {shlex.quote(tunnel_id)}",
         localhost=cfg.localhost,
         check=False,
@@ -319,7 +320,7 @@ def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
 
 def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
     cp = run_subprocess(
-        cfg.localhost, cfg.local_env,
+        cfg.localhost, None, #cfg.local_env,
         f"globus streams tunnel delete {shlex.quote(tunnel_id)}",
         localhost=cfg.localhost,
         check=False,

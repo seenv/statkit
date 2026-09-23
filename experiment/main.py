@@ -18,7 +18,7 @@ def main() -> None:
     for cfg in configs:
         #print(cfg)
         test_name = Path(cfg.report_dir).name
-        log_dir = Path.home() / "Projects" / "globus_stream" / "statkit" / "results" / "reports" / cfg.lease.lower() / cfg.test / test_name
+        log_dir = Path.home() / "Projects" / "gstreams" / "statkit" / "results" / "reports" / cfg.lease.lower() / cfg.test / test_name
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{test_name}.log"     #log_path = log_dir / f"{datetime.now().strftime('%m-%d-%H-%M')}.log"
 

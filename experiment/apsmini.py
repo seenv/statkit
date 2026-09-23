@@ -13,18 +13,18 @@ from remote import run_subprocess, popen_subprocess
 #         #f"-v $HOME/{shlex.quote(tomo)}:/mnt/{shlex.quote(tomo)}:ro "
 #         #f"--simulation_file /mnt/{shlex.quote(tomo)} "
 def _daq_service(port: int, file: str, i: int) -> str:
-    if file == "tomo_00058.h5":
+    if file != "tomo_00058_all_subsampled1p_s1079s1081.h5":
         simu_file_path = f"/mnt/{shlex.quote(file)}"
-        mount_drive = f"-v $HOME/{shlex.quote(file)}:/mnt/{shlex.quote(file)}:ro"
-    else:
-        simu_file_path =  f"/aps-mini-apps/data/{shlex.quote(file)}"
-        mount_drive = ""
+        mount_drive = f"-v /tmp/mini/{shlex.quote(file)}:/mnt/{shlex.quote(file)}:ro"
+
     return (
         f"docker run --rm --network host "
+        # f"docker run -d --rm --network host "
         f"--name daq-{i} "
         #f"-v $HOME/{shlex.quote(tomo)}:/mnt/{shlex.quote(tomo)}:ro "
         f"{mount_drive} "
         f"seenv/aps-mini-apps-daq:v1.1 "
+        # f"seenv/aps-mini-apps-daq:latest "
         f"python /aps-mini-apps/build/python/streamer-daq/DAQStream.py "
         f"--mode 1 "
         # f"--simulation_file /aps-mini-apps/data/{shlex.quote(file)} "
@@ -32,46 +32,60 @@ def _daq_service(port: int, file: str, i: int) -> str:
         f"--simulation_file {simu_file_path} "
         f"--d_iteration 10000 "
         f"--publisher_addr tcp://*:{port} "
-        f"--iteration_sleep=1 "
+        #f"--iteration_sleep=1 "
+        f"--iteration_sleep=0.5 "
         f"--projection_sleep=0 "
         f"--synch_count 1; "
     )
     
 def _dist_service(ip: str, port: int, file: str, i: int) -> str:
-    num_sino = 2160 if file == "tomo_00058.h5" else 2
+    if file == "tomo_00058.h5":
+        num_sino = 2160 
+    # elif file == 'tomo_00058_1GB.h5':
+    #     num_sino = 130
+    # elif file == 'tomo_00058_4GB.h5':
+    #     num_sino == 520
+    else:
+        num_sino = 2
     return (
         f"docker run --rm --network host "
+        # f"docker run -d --rm --network host "
         f"--name dist-{i} "
         f"seenv/aps-mini-apps-dist:latest "
         f"python /aps-mini-apps/build/python/streamer-dist/"
         f"ModDistStreamPubDemo.py "
         f"--data_source_addr tcp://{ip}:{port} "
-        #f"--data_source_addr tcp://{shlex(ip)}:{port} "
+        #f"--data_source_addr tcp://{shlex.quote(ip)}:{port} "
         f"--cast_to_float32 "
         f"--normalize "
-        f"--my_distributor_addr tcp://127.0.0.1:4200{i} "
+        f"--my_distributor_addr tcp://127.0.0.1:6000{i} "
         f"--beg_sinogram 1500 "
         f"--num_sinograms {num_sino} "
         f"--num_columns 2560; "
     )
 
-
 def _sirt_service(i: int) -> str:
     return (
         f"docker run --rm --network host "
+        # f"docker run -d --rm --network host "
         f"--name sirt-{i} "
         f"seenv/aps-mini-apps-sirt:latest "
         f"/aps-mini-apps/build/bin/sirt_stream "
-        f"--write-freq 4 "
         f"--dest-host 127.0.0.1 "
-        f"--dest-port 4200{i} "
+        # f"--dest-port 4200{i} "
+        f"--dest-port 6000{i} "
+        f"--write-freq 4 "
+        #f"--write-freq 1024 "
         f"--window-iter 1 "
         f"--window-step 1 "
         f"--window-length 4 "
+        #f"--window-length 1024 "
         f"-t 2 "
         f"-c 1427 "
-        f"--pub-addr tcp://*:5300{i}; "
+        # f"--pub-addr tcp://*:5300{i}; "
+        f"--pub-addr tcp://*:6005{i}; "
     )
+
 def _get_container_stats(cfg: Config, host: str, timeout: int, check: bool = False) -> int:
     cp = run_subprocess(
         host, None,
@@ -133,14 +147,18 @@ def _start_mini_service(
     #for i, (tunnel_port, tunnel_id) in enumerate(zip(tunnel_ports, tunnel_ids)):
     for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
         # wrapper_cmd = f"globus-streams-launch -p {start_port + (i * 2)} {stream_id}  " if service == "daq" else f"globus-streams-launch {stream_id} "STD
-        if app == "mini_base":
-            wrapper_cmd = ""
-        else:
-            wrapper_cmd = f"globus-streams-launch -p {start_port + (i * 2)} {stream_id}  " if service == "daq" else f"globus-streams-launch {stream_id} "
+        # if app == "mini_base":
+        #     wrapper_cmd = ""
+        # else:
+        #     wrapper_cmd = f"globus-streams-launch -p {start_port + (i * 2)} {stream_id}  " if service == "daq" else f"globus-streams-launch {stream_id} "
+        wrapper_cmd = '' if app != 'mini_gst' else f"globus-streams-launch -p {start_port + (i * 2)} {stream_id}  " if service == "daq" else f"globus-streams-launch {stream_id} "
 
         if service == "daq":
-            # cmd = _daq_service(start_port + (i * 2), file, i)
-            cmd = _daq_service(start_port + (i * 2), file, i)
+            if app == 'mini_gst' or app == 'mini_base':
+                # cmd = _daq_service(start_port + (i * 2), file, i)
+                cmd = _daq_service(start_port + (i * 2), file, i)
+            if app == 'mini_sci':
+                cmd = _daq_service(cfg.inbound_ports[0] + (i * 5), file, i)
         elif service == "dist":
             # cmd = _dist_service(initiator_gw_ip, tunnel_port, i)
             cmd = _dist_service(listener_ip, listen_port, file, i)
@@ -227,6 +245,7 @@ def start_mini_app(
         #tunnel_ids, tunnel_ports, initiator_gw_ip, timeout, file, out_dir,
         stream_ids, listen_ports, listen_ip, timeout, file, out_dir,
     )
+    time.sleep(1)
     _are_containers_running(cfg, host, parallel, service, timeout, retries)
         
     host, service = cfg.hosts.ep["initiator"], "dist"
@@ -236,6 +255,7 @@ def start_mini_app(
         #tunnel_ids, tunnel_ports, initiator_gw_ip, timeout, file, out_dir,
         stream_ids, listen_ports, listen_ip, timeout, file, out_dir,
     )
+    time.sleep(1)
     _are_containers_running(cfg, host, parallel, service, timeout, retries)
     time.sleep(cfg.sleep)
 

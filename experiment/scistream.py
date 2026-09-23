@@ -16,10 +16,10 @@ def _replace_haproxy_cfg(cfg, config_file, check: bool = True):
     for host in cfg.hosts.ap.values():
         cp = run_subprocess(
             host, None,
-            f'cp $HOME/seenv-scistream-proto/src/s2ds/{config_file} '
-            f'$HOME/seenv-scistream-proto/src/s2ds/haproxy.cfg.j2 && '
+            f'cp $HOME/scistream-proto/src/s2ds/{config_file} '
+            f'$HOME/scistream-proto/src/s2ds/haproxy.cfg.j2 && '
             f'sleep 1 && '
-            f'cat $HOME/seenv-scistream-proto/src/s2ds/haproxy.cfg.j2 ',
+            f'cat $HOME/scistream-proto/src/s2ds/haproxy.cfg.j2 ',
             localhost=cfg.localhost,
         )
         if check and cp.returncode != 0:
@@ -112,7 +112,7 @@ def _check_proxy_config(cfg, stream_uid):
             f'cat /tmp/.scistream/{stream_uid}.conf ',
             localhost=cfg.localhost,
         )
-        logging.debug("SCI: Proxy config file on %s:\n %s", host.upper(), cp.stdout)
+        logging.debug("SCI: Proxy config file on %s:\n %s", host.upper(), cp.stdout.splitlines()[-10:])
 
 # -------------------------------------------------------------------------------
 # S2CS
@@ -128,7 +128,7 @@ def start_s2cs(
         f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
         #f"timeout 60s "
         f"setsid stdbuf -oL -eL "
-        f"timeout 15 s2cs --verbose --port={cfg.scisync_port} "#q--listener_ip={shlex.quote(cfg.listener_ip)} "     # f"s2cs --verbose --port={cfg.scisync_port} --listener_ip=128.135.37.241 "
+        f"timeout 5 s2cs --verbose --port={cfg.scisync_port} --listener_ip={shlex.quote(listener_ip)} "     # f"s2cs --verbose --port={cfg.scisync_port} --listener_ip=128.135.37.241 "
         f"--port_range {port_range} "
         f"--server_crt=\"$HAPROXY_CONFIG_PATH\"/server.crt "
         f"--server_key=\"$HAPROXY_CONFIG_PATH\"/server.key "
@@ -146,23 +146,24 @@ def start_s2cs(
 # Inbound connection on Listener EP
 def inbound(
     cfg: Config, host: str, receiver_ports: Sequence[int], remote_ip: str, s2cs_ip: str, sync_port: int, 
-    parallel: int, timeout: int, scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True,
+    parallel: int, timeout: int, idx: int,scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True,
 ) -> tuple[Optional[str], Sequence[str]]:
     ports_list = ",".join(str(p) for p in receiver_ports)
     listener_eps = ",".join(f"{cfg.listener_ap_ip}:{p}" for p in receiver_ports)
     cp = run_subprocess(
         host, cfg.scistream_env,
-        f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
-        f"cd \"$HAPROXY_CONFIG_PATH\"; "
-        f"sleep 1; "
+        # f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
+        # f"cd \"$HAPROXY_CONFIG_PATH\"; "
+        f"mkdir -p /tmp/.scistream && cd /tmp/.scistream; "
+        # f"sleep 1; "
 
         f's2uc inbound-request --remote_ip {cfg.listener_ip} --num_conn 1 '    #f"s2uc inbound-request --remote_ip 128.135.24.117 --num_conn 5 "
-        f'--receiver_ports={ports_list}  --s2cs {cfg.listener_ap_pub}:{cfg.scisync_port} --rate 1000000000 '    #f"--receiver_ports=5074,5075,5076,5077,5078  --s2cs 128.135.24.119:5007 --rate 100000 "
-        f"--server_cert=\"$HAPROXY_CONFIG_PATH\"/server.crt "
-        f"> \"$HAPROXY_CONFIG_PATH\"/conin.log 2>&1 & echo $! >> \"$HAPROXY_CONFIG_PATH\"/inbound.pid; "
-        # f'while ! grep -q "Listeners:" "$HAPROXY_CONFIG_PATH"/conin.log; do sleep 1; done; '
-        f"sleep 1; "
-        f"cat \"$HAPROXY_CONFIG_PATH\"/conin.log ",
+        f'--receiver_ports={ports_list}  --s2cs  {cfg.listener_ap_ip}:{cfg.scisync_port} --rate 1000000000 ' #{cfg.listener_ap_pub}:{cfg.scisync_port} --rate 1000000000 '    #f"--receiver_ports=5074,5075,5076,5077,5078  --s2cs 128.135.24.119:5007 --rate 100000 "
+        f"--server_cert=/tmp/.scistream/server.crt "
+        f"> /tmp/.scistream/conin-{idx}.log 2>&1 & echo $! >> /tmp/.scistream/inbound.pid; "
+        f'while ! grep -q "Listeners:" /tmp/.scistream/conin-{idx}.log; do sleep 1; done; '
+        # f"sleep 1; "
+        f"cat /tmp/.scistream/conin-{idx}.log ",
         localhost=cfg.localhost,
     )
     
@@ -175,10 +176,11 @@ def inbound(
     _UUID = re.search(r'^([a-fA-F0-9-]{36})\s+.*INVALID_TOKEN PROD', results, re.MULTILINE)
     stream_uid = _UUID.group(1) if _UUID else None
     m = re.search(r'^Listeners:\s*\[(.*)\]$', results, re.MULTILINE)
-    if m:
-        listeners = re.findall(r"'(\d+\.\d+\.\d+\.\d+):(\d+)'", m.group(1))
-        listen_ips = [ip for ip, _ in listeners]
-        listen_ports = [int(port) for _, port in listeners]
+    # if m:
+    listeners = re.findall(r"'(\d+\.\d+\.\d+\.\d+):(\d+)'", m.group(1))
+    listen_ips = [ip for ip, _ in listeners]
+    listen_ports = [int(port) for _, port in listeners]
+    logging.debug(f'DEBUG: {results} {listen_ips}')
     logging.debug(f"INBOUND: Started inbound connection on {host.upper()}: \n Stream ID: {stream_uid} \n Listener IPs: {listen_ips} \n Ports: {listen_ports}")
     return stream_uid, listen_ips, listen_ports
 
@@ -187,7 +189,7 @@ def inbound(
 def outbound(
     cfg: Config, host: str, stream_uid: str, remote_ip: str, receiver_ap_ip: str, 
     receiver_ports: Sequence[int], s2cs_ip: str, sync_port: int, parallel: int, 
-    timeout: int, scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True,
+    timeout: int, idx: int, scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True,
 ) -> None:
     #if not stream_uid or not (len(receiver_ports) == parallel):
     #    raise RuntimeError(f"OUTBOUND: Expected all lists to have length parallel={parallel}: {len(receiver_ports)},and a Stream UID: {stream_uid}")
@@ -197,17 +199,18 @@ def outbound(
 
     cp = run_subprocess(
         host, cfg.scistream_env,
-        f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
-        f"sleep 1; "
+        # f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
+        f'mkdir -p /tmp/.scistream && cd /tmp/.scistream; '
+        # f"sleep 1; "
         
-        f's2uc outbound-request --remote_ip {cfg.listener_ap_pub} --num_conn 1 --rate 1000000000 '    #f"s2uc outbound-request --remote_ip 128.135.164.119 --num_conn 5  --rate 100000 "
-        f'--receiver_ports={ports_list} --s2cs {cfg.initiator_ap_ip}:{cfg.scisync_port} '   #f"--receiver_ports=5100,5101,5102,5103,5104 --s2cs 128.135.37.241:5007 "
-        f'{stream_uid} {listener_eps} '      #f"128.135.164.119:5100,128.135.164.119:5101,128.135.164.119:5102,128.135.164.119:5103,128.135.164.119:5104 "
-        f"--server_cert=\"$HAPROXY_CONFIG_PATH\"/server.crt "
-        f"> \"$HAPROXY_CONFIG_PATH\"/conout.log 2>&1 & echo $! >> \"$HAPROXY_CONFIG_PATH\"/outbound.pid; "
-        # f'while ! grep -q "Listeners:" "$HAPROXY_CONFIG_PATH"/conout.log; do sleep 1; done; '
-        f"sleep 1; "
-        f"cat \"$HAPROXY_CONFIG_PATH\"/conout.log ",
+        f's2uc outbound-request --remote_ip {cfg.listener_ap_pub} --num_conn 1 --rate 1000000000 '              #f"s2uc outbound-request --remote_ip 128.135.164.119 --num_conn 5  --rate 100000 "
+        f'--receiver_ports={ports_list} --s2cs {cfg.initiator_ap_ip}:{cfg.scisync_port} --rate 1000000000 '     #{cfg.initiator_ap_ip}:{cfg.scisync_port} '   #f"--receiver_ports=5100,5101,5102,5103,5104 --s2cs 128.135.37.241:5007 "
+        f'{stream_uid} {listener_eps} '                                                                         #f"128.135.164.119:5100,128.135.164.119:5101,128.135.164.119:5102,128.135.164.119:5103,128.135.164.119:5104 "
+        f"--server_cert=/tmp/.scistream/server.crt "
+        f"> /tmp/.scistream/conout-{idx}.log 2>&1 & echo $! >> /tmp/.scistream/outbound.pid; "
+        f'while ! grep -q "Listeners:" /tmp/.scistream/conout-{idx}.log; do sleep 1; done; '
+        # f"sleep 1; "
+        f"cat /tmp/.scistream/conout-{idx}.log ",
         localhost=cfg.localhost,
     )
     if check and cp.returncode != 0:
@@ -219,11 +222,11 @@ def outbound(
     _UUID = re.search(r'^([a-fA-F0-9-]{36})\s+.*INVALID_TOKEN PROD', results, re.MULTILINE)
     stream_uid = _UUID.group(1) if _UUID else None
     m = re.search(r'^Listeners:\s*\[(.*)\]$', results, re.MULTILINE)
-    if m:
-        listeners = re.findall(r"'(\d+\.\d+\.\d+\.\d+):(\d+)'", m.group(1))
-        listen_ips = [ip for ip, _ in listeners]
-        listen_ports = [int(port) for _, port in listeners]
-    logging.debug(f"OUTBOUND: Started inbound connection on {host.upper()}: \n Stream ID: {stream_uid} \n Listener IPs: {listen_ips} \n Ports: {listen_ports}")
+    #if m:
+    listeners = re.findall(r"'(\d+\.\d+\.\d+\.\d+):(\d+)'", m.group(1))
+    listen_ips = [ip for ip, _ in listeners]
+    listen_ports = [int(port) for _, port in listeners]
+    logging.debug(f"OUTBOUND: Started outbound connection on {host.upper()}: \n Stream ID: {stream_uid} \n Listener IPs: {listen_ips} \n Ports: {listen_ports}")
     return listen_ips, listen_ports
 
 # -------------------------------------------------------------------------------
@@ -242,46 +245,69 @@ def start_scistream(
         key, crt = _key_gen(cfg, cfg.hosts.ap.get("listener"))
         _key_dist(cfg, hosts, key, crt)
     inbound_start_range = cfg.inbound_ports[0]
+    # outbound_start_range = cfg.inbound_ports[0]
     outbound_start_range = cfg.outbound_ports[0]
+    port_range_start = outbound_start_range
+    port_range_end = outbound_start_range + 1
+    # port_range_end = outbound_start_range + (5 * (parallel + 1))
     stream_ids, listen_ap_ports, initiate_ap_ports, listen_ep_ports, initiate_ep_ports = [], [], [], [], []
+
     for i in range(parallel):
-        port_range = f'{outbound_start_range}-{outbound_start_range + parallel}' #(parallel) }'
+        # port_range = f'{outbound_start_range}-{outbound_start_range + 1}' #(parallel) }'
+        port_range = f'{port_range_start}-{port_range_end}' #(parallel) }'
         start_s2cs(cfg, host=cfg.hosts.ap.get("listener"), listener_ip=cfg.listener_ip, sync_port=cfg.scisync_port, port_range=port_range, timeout=timeout)
-        start_s2cs(cfg, host=cfg.hosts.ap.get("initiator"), listener_ip=cfg.initiator_ap_ip, sync_port=cfg.scisync_port, port_range=port_range, timeout=timeout)
-        time.sleep(cfg.sleep)
+        # start_s2cs(cfg, host=cfg.hosts.ap.get("initiator"), listener_ip=cfg.initiator_ap_ip, sync_port=cfg.scisync_port, port_range=port_range, timeout=timeout)
+        #time.sleep(cfg.sleep)
+        time.sleep(1)
         # listen_ep_ports = [cfg.inbound_ports[0] + (i) for i in range(parallel)]
         #listen_ep_ports = [cfg.inbound_ports[0] + i]
         listen_ep_port = [inbound_start_range]
-        inbound_start_range += parallel + 1
+        # inbound_start_range += parallel + 1
+
+        host = cfg.hosts.ep.get("listener")
         stream_uid, listen_ap_ip, listen_ap_port = inbound(
-            cfg, host=cfg.hosts.ep.get("listener"), 
-            #receiver_port=cfg.inbound_ports[0], 
+            cfg, host=host, 
             receiver_ports=listen_ep_port,
-            remote_ip=cfg.listener_ip,
+            remote_ip=cfg.listener_ap_ip,
             s2cs_ip=cfg.listener_ap_pub,
             sync_port=cfg.scisync_port,
             parallel=parallel, timeout=timeout,
+            idx = i,
             )
 
+        start_s2cs(cfg, host=cfg.hosts.ap.get("initiator"), listener_ip=cfg.initiator_ap_ip, sync_port=cfg.scisync_port, port_range=port_range, timeout=timeout)
+        #time.sleep(cfg.sleep)
+        time.sleep(1)
+
         initiate_ep_port =[outbound_start_range]
-        outbound_start_range += parallel + 1
+        # outbound_start_range += parallel + 1
+        host = cfg.hosts.ep.get("initiator")
         initiate_ap_ip, initiate_ap_port = outbound(
-            cfg, host=cfg.hosts.ep.get("initiator"), 
+            cfg, host=host, 
             stream_uid=stream_uid, # listen_ports,
             remote_ip=cfg.initiator_ap_pub, 
             receiver_ap_ip=cfg.listener_ap_pub, 
-            #receiver_port=cfg.outbound_ports[0], 
             receiver_ports=initiate_ep_port, 
             s2cs_ip=cfg.initiator_ap_pub,
             sync_port=cfg.scisync_port,
             parallel=parallel, timeout=timeout,
+            idx = i,
         )
+        time.sleep(cfg.sleep)
+        port_range_start += 5
+        port_range_end += 5
+        inbound_start_range += 5
+        outbound_start_range += 5
         _check_proxy_config(cfg, stream_uid)
         stream_ids.append(stream_uid)
         listen_ap_ports.extend(listen_ap_port)
         initiate_ap_ports.extend(initiate_ap_port)
         listen_ep_ports.extend(listen_ep_port)
         initiate_ep_ports.extend(initiate_ep_port)
+        logging.debug(
+            "SCI: Started the tunnel: \nStream UID: %s, Listen AP Port: %s, Initiate AP Port: %s, Listen EP Port: %s, Initiate EP Port: %s", 
+            stream_uid, listen_ap_port, initiate_ap_port, listen_ep_port, initiate_ep_port
+        )
 
     logging.info(f"SCI: Started Scistream tunnel")
     logging.debug(
@@ -338,4 +364,3 @@ def stop_scistream(
             )
         logging.debug(f"SCI: Stopped SciStream S2US on {host.upper()}") 
     logging.info(f"SCI: Stopped SciStream on nodes")
-        

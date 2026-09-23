@@ -57,7 +57,8 @@ def run_iperf_gst(
             cfg, listener_host, start_port, stream_ids, parallel, numa, output_dir, 
             app_tag, files, timeout, temp_dir="/tmp/temp_files"
         )
-        time.sleep(cfg.sleep)
+        #time.sleep(cfg.sleep)
+        time.sleep(parallel + cfg.sleep)
 
         # run iperf client
         logging.info("IGST: Starting iperf client")        
@@ -115,7 +116,8 @@ def run_iperf_base(
             cfg, listener_host, start_port, stream_ids, parallel, numa, output_dir, 
             app_tag, files, timeout, temp_dir="/tmp/temp_files"
         )
-        time.sleep(cfg.sleep)           # it takes more for them to initiates! TODO: find a better way
+        #time.sleep(cfg.sleep)           # it takes more for them to initiates! TODO: find a better way
+        time.sleep(parallel + cfg.sleep)
 
         # run iperf client
         logging.info("IBASE: Starting iperf client")
@@ -148,8 +150,8 @@ def run_iperf_scistream(
     
     logging.info("")
     logging.info("--------------- Tests %d / %d: Starting iPerf3 Scistream Tests ---------------", idx, total_runs)
-    stream_ids, listen_ports = [], []
-    listen_ip = cfg.listener_pub
+    # stream_ids, listen_ports = [], []
+    # listen_ip = cfg.listener_pub
 
     try:
         logging.info("ISCI: Creating %d SciStream tunnels ", parallel)
@@ -168,7 +170,8 @@ def run_iperf_scistream(
             cfg, listener_host, listen_ep_ports, stream_ids, parallel, numa, 
             output_dir, app_tag, files, timeout, temp_dir="/tmp/temp_files"
         )
-        time.sleep(cfg.sleep)
+        #time.sleep(cfg.sleep)
+        time.sleep(parallel + cfg.sleep)
 
         # run iperf client
         logging.info("ISCI: Starting iperf client")
@@ -406,6 +409,7 @@ def run_mini_gst(
     parallel: int, arg: int, start_port: int, listener_host: str, initiator_host: str, 
     numa: str, output_dir: str, encrypt: int, app_tag: str,
 ) -> None:
+
     logging.info("")
     logging.info("--------------- Tests %d / %d: Starting APS mini app GST Tests ---------------", idx, total_runs)
     stream_ids, listen_ports = [], []
@@ -461,7 +465,7 @@ def run_mini_base(
     encrypt: int, app_tag: str,
 ) -> None:
     logging.info("")
-    logging.info("--------------- Tests %d / %d: Starting APS mini app GST Tests ---------------", idx, total_runs)
+    logging.info("--------------- Tests %d / %d: Starting APS mini app Direct Tests ---------------", idx, total_runs)
     stream_ids, listen_ports = [], []
     listen_ip = cfg.listener_pub
     try:
@@ -499,6 +503,56 @@ def run_mini_base(
         stop_mini_containers(cfg, parallel, app_tag, output_dir, timeout)
         prune_containers(cfg, parallel, app_tag, output_dir, timeout)
 
+# ------------------------------------------------------------------------------
+# APS Mini App SciStream
+def run_mini_scistream(
+    cfg: Config, *, idx: int, total_runs: int, timeout: int, tomo_file: str, 
+    parallel: int, arg: int, start_port: int, listener_host: str, initiator_host: str, 
+    numa: str, output_dir: str, encrypt: int, app_tag: str,
+) -> None:
+    
+    logging.info("")
+    logging.info("--------------- Tests %d / %d: Starting APS mini app SciStream Tests ---------------", idx, total_runs)
+    # stream_ids, listen_ports = [], []
+    # listen_ip = cfg.listener_pub
+
+    try:
+        logging.info("MSCI: Creating %d SciStream tunnels ", parallel)
+        stream_ids, listen_ap_ports, initiate_ap_ports, listen_ep_ports, initiate_ep_ports = start_scistream(
+            cfg, encrypt, parallel, timeout
+        )
+
+        if not cfg.is_test:
+            logging.info("MSCI: Starting the statkit monitoring on the hosts")
+            start_statkit(cfg, timeout, app_tag, output_dir)   #size as duration which will be * 60s
+            time.sleep(cfg.sleep)
+        
+        logging.info("MSCI: Starting APS mini app containers on the endpoints")
+        start_mini_app(
+            cfg, parallel, numa, app_tag, start_port, cfg.initiator_ap_ip, initiate_ap_ports, 
+            stream_ids, output_dir, tomo_file, timeout, module_path="/tmp/temp_files"
+        )
+
+        if cfg.test == "stream":
+            time.sleep(arg)
+            stop_mini_containers(cfg, parallel,app_tag, output_dir, timeout)
+        # else:
+        #     wait_finish_transfer(cfg, parallel,app_tag, output_dir, timeout)
+        #     stop_mini_containers(cfg, parallel,app_tag, output_dir, timeout)
+
+        if not cfg.is_test:
+            logging.info("MSCI: Recording RTT")        # it will run on the client
+            record_ping(cfg, initiator_host, cfg.listener_pub, app_tag, output_dir)
+
+    except Exception as e:
+        raise RuntimeError(f"MSCI: Runtime Error: {e}") from e
+
+    finally:
+        # cleanup_iperf(cfg)
+        stop_scistream(cfg)
+        if not cfg.is_test:
+            logging.info("MSCI: Stopping the statkit monitoring on the hosts")
+            stop_statkit(cfg)
 
 # ------------------------------------------------------------------------------
 # Main
@@ -532,6 +586,7 @@ def experiment_main(cfg: Config) -> None:
             "gtr" in cfg.app and cfg.test == "transfer",
             "mini" in cfg.app and cfg.test == "stream",
             "mbase" in cfg.app and cfg.test == "stream",
+            "msci" in cfg.app and cfg.test == "stream",
         )
     )
 
@@ -693,6 +748,21 @@ def experiment_main(cfg: Config) -> None:
                     numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="mini_base",
                 )
 
+            if "msci" in cfg.app and cfg.test == "stream":
+                test_idx += 1   
+                start_port = cfg.mini_port
+                run_mini_scistream(
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    tomo_file=cfg.tomo_file, parallel=parallel, arg=arg, start_port=start_port,
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="mini_sci",
+                )
+
+            if cfg.test == "transfer":
+                try:
+                    cleanup_file(cfg)
+                except Exception:
+                    logging.exception("MAIN: File cleanup failed for %s", cfg.test)
             time.sleep(cfg.sleep)
 
         except Exception as exc:

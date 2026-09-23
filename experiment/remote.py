@@ -9,7 +9,19 @@ from typing import Optional
 
 # run subprocess via ssh
 def _ssh_base(host: str) -> list[str]:
-    return ["ssh", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=10", "-o", "ControlMaster=no", "-o", "TCPKeepAlive=yes", host, "bash", "-lc"]
+    return [
+        "ssh", "-n", "-T", 
+        "-o", "BatchMode=yes", 
+        "-o", "ConnectTimeout=30",
+        "-o", "ConnectionAttempts=10",
+        "-o", "ServerAliveInterval=30", 
+        "-o", "ServerAliveCountMax=20",
+        "-o", "ControlMaster=no",
+        "-o", "ControlPath=none",
+        "-o", "TCPKeepAlive=yes",
+        "-o", "LogLevel=ERROR",
+        host, "bash", "-lc"
+    ]
 
 
 def is_ssh_failure(cp: subprocess.CompletedProcess[str]) -> bool:

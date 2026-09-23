@@ -41,19 +41,19 @@ def _parse_test_list(s: str) -> list[TestMode]:
 
     return [cast(TestMode, test) for test in tests]
 
-def _parse_proxy_list(s: str) -> list[str]:
-    valid_proxies = {"apache", "stunnel", "haproxy"}
-    proxies = _parse_str_list(s)
-    invalid = sorted(set(proxies) - valid_proxies)
-    if invalid:
-        raise argparse.ArgumentTypeError(
-            f"Invalid proxy(s): {', '.join(invalid)}. "
-            f"Valid choices: {', '.join(sorted(valid_proxies))}"
-        )
-    return proxies
+# def _parse_proxy_list(s: str) -> list[str]:
+#     valid_proxies = {"apache", "stunnel", "haproxy"}
+#     proxies = _parse_str_list(s)
+#     invalid = sorted(set(proxies) - valid_proxies)
+#     if invalid:
+#         raise argparse.ArgumentTypeError(
+#             f"Invalid proxy(s): {', '.join(invalid)}. "
+#             f"Valid choices: {', '.join(sorted(valid_proxies))}"
+#         )
+#     return proxies
 
 def _parse_app_list(s: str) -> list[str]:
-    valid_apps = {"iperf", "ibase", "sperf", "rsync", "rbase", "ssync", "gtr", "mini", "mbase"}
+    valid_apps = {"iperf", "ibase", "sperf", "rsync", "rbase", "ssync", "gtr", "mini", "mbase", "msci"}
     apps = _parse_str_list(s)
     invalid = sorted(set(apps) - valid_apps)
     if invalid:
@@ -84,10 +84,10 @@ def _default_hosts_for_lease(lease: str) -> dict[str, str]:
         }
     elif lease.lower() == "fabric":
         return {
-            "initiator_ap"  : "mfab-c2cs",
-            "listener_ap"   : "mfab-p2cs",
-            "initiator_ep"  : "mfab-cons",
-            "listener_ep"   : "mfab-prod",
+            "initiator_ap"  : "m-max-ap",
+            "listener_ap"   : "m-wash-ap",
+            "initiator_ep"  : "m-max-ep",
+            "listener_ep"   : "m-wash-ep",
         }
     elif lease.lower() == "guys":
         return {
@@ -118,15 +118,15 @@ def _default_ips_for_lease(lease: str) -> dict[str, str]:
         }
     elif lease.lower() == "fabric":
         return {
-            "listener_ip": "192.168.10.10",
-            "listener_pub": "192.168.10.10",
-            "initiator_ip": "192.168.20.10",
-            "initiator_pub": "192.168.20.10",
+            "listener_ip": "192.168.80.10",
+            "listener_pub": "192.168.80.10",
+            "initiator_ip": "192.168.50.10",
+            "initiator_pub": "192.168.50.10",
 
-            "listener_ap_ip": "192.168.10.20",
-            "listener_ap_pub": "192.168.100.10",
-            "initiator_ap_ip": "192.168.20.20",
-            "initiator_ap_pub": "192.168.100.20",
+            "listener_ap_ip": "192.168.80.20",
+            "listener_ap_pub": "192.168.100.80",
+            "initiator_ap_ip": "192.168.50.20",
+            "initiator_ap_pub": "192.168.100.50",
         }
     elif lease.lower() == "guys":
         return {
@@ -160,10 +160,10 @@ def _default_interfaces_for_lease(
         }
     elif lease.lower() == "fabric":
         return {
-            "initiator_ap": ["enp8s0np0", "enp9s0np1"],
-            "listener_ap": ["enp8s0np0", "enp9s0np1"],
-            "initiator_ep": ["enp7s0", "enp8s0"],
-            "listener_ep": ["enp7s0", "enp8s0"],
+            "initiator_ap": ["enp7s0np0", "enp8s0np1"],
+            "listener_ap":  ["enp7s0np0", "enp8s0np1"],
+            "initiator_ep": ["enp7s0np0", "enp8s0np1"],
+            "listener_ep":  ["enp8s0np0", "enp9s0np1"],
         }
     elif lease.lower() == "guys":
         return {
@@ -212,7 +212,6 @@ class Config:
     is_test: bool
     lease: str
     test: TestMode
-    #proxy: Sequence[str]
 
     numactl: Sequence[str]
     tcp_buffer: str
@@ -239,6 +238,7 @@ class Config:
     rsync_port: int
     mini_port: int
     mbase_port: int
+    msci_port: int
     scisync_port: int
     inbound_ports: Sequence[int]
     outbound_ports: Sequence[int]
@@ -247,7 +247,6 @@ class Config:
     sleep: int
 
     app: Sequence[str]
-    # encrypt: Sequence[int]
     encrypt: bool
     splice: Sequence[int]
     parallels: Sequence[int]
@@ -260,6 +259,7 @@ class Config:
     remote_env: str
     scistream_env: str
     report_dir: str
+    proj_dir: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -295,24 +295,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initiator-ap-ip", default=None, help="Initiator Ap Private IP address")
     parser.add_argument("--initiator-ap-pub", default=None, help="Initiator Ap Public IP address (accessible by Listener EP)")
 
-    parser.add_argument("--tunnel-port", type=int, default=5000)
-    parser.add_argument("--encrypt-port", type=int, default=5100)
-    parser.add_argument("--direct-port", type=int, default=5200)
-    parser.add_argument("--rsync-port", type=int, default=5300)
-    parser.add_argument("--mini-port", type=int, default=5400)
-    parser.add_argument("--mbase-port", type=int, default=5500)
-    parser.add_argument("--scisync-port", type=int, default=5600)
-    #parser.add_argument("--inbound-ports", type=_parse_int_list, default=[51115,51116,51117,51118,51119])
-    #parser.add_argument("--outbound-ports", type=_parse_int_list, default=[51130,51131,51132,51133,51134])
-    parser.add_argument("--inbound-ports", type=_parse_int_list, default=[5700])
-    parser.add_argument("--outbound-ports", type=_parse_int_list, default=[5800])
-    parser.add_argument("--tomo-file", type=str, default="tomo_00058_all_subsampled1p_s1079s1081.h5", choices=["tomo_00058_all_subsampled1p_s1079s1081.h5", "tomo_00058.h5"])
+    parser.add_argument("--tunnel-port", type=int, default=59000)
+    parser.add_argument("--encrypt-port", type=int, default=59100)
+    parser.add_argument("--direct-port", type=int, default=59200)
+    parser.add_argument("--rsync-port", type=int, default=59300)
+    parser.add_argument("--mini-port", type=int, default=59400)
+    parser.add_argument("--mbase-port", type=int, default=59500)
+    parser.add_argument("--msci-port", type=int, default=59600)
+    parser.add_argument("--scisync-port", type=int, default=59999)
+    parser.add_argument("--inbound-ports", type=_parse_int_list, default=[59700])
+    parser.add_argument("--outbound-ports", type=_parse_int_list, default=[59800])
+    parser.add_argument("--tomo-file", type=str, default="tomo_00058_all_subsampled1p_s1079s1081.h5")   #, choices=["tomo_00058_all_subsampled1p_s1079s1081.h5", "tomo_00058.h5"])
 
     parser.add_argument("--sleep", type=int, default=5)
 
-    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,sperf,rsync,rbase,ssync,gtr,mini,mbase")
+    parser.add_argument("--app", type=_parse_app_list, required=True, help="Comma-separated applications: iperf,ibase,sperf,rsync,rbase,ssync,gtr,mini,mbase,msci")
     parser.add_argument("--encrypt", action="store_true", help="Enabling encryption and disabling the splice")
-    #parser.add_argument("--splice", type=_parse_int_list, help="Splice option, 0: disable, 1: enable")
     parser.add_argument("--splice", type=_parse_int_list, default=None, help="Splice option, 0: disable, 1: enable")
     parser.add_argument("--parallel", "-P", type=_parse_int_list, default=[1])
     parser.add_argument("--time", "-t", type=_parse_int_list, default=[15])
@@ -322,7 +320,6 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--output", "-o", default="/tmp/")
 
-    #return parser.parse_args()
     return parser, parser.parse_args()
 
 
@@ -338,6 +335,9 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
     args.listener_ap = args.listener_ap if args.listener_ap is not None else default_hosts["listener_ap"]
     args.initiator_ep = args.initiator_ep if args.initiator_ep is not None else default_hosts["initiator_ep"]
     args.listener_ep = args.listener_ep if args.listener_ep is not None else default_hosts["listener_ep"]
+    # for key, val in default_hosts.items():
+    #     if getattr(args, key) is None:
+    #         setattr(args, key, val)
 
     args.initiator_ap_devs = (args.initiator_ap_devs if args.initiator_ap_devs is not None else default_devs["initiator_ap"])
     args.listener_ap_devs = (args.listener_ap_devs if args.listener_ap_devs is not None else default_devs["listener_ap"])
@@ -359,7 +359,6 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         is_test=args.is_test,
         lease=args.lease,
         test=test_mode,
-        # proxy=args.proxy,
 
         numactl=args.numactl,
         tcp_buffer=args.tcp_buffer,
@@ -395,6 +394,7 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         rsync_port=args.rsync_port,
         mini_port=args.mini_port,
         mbase_port=args.mbase_port,
+        msci_port=args.msci_port,
         scisync_port=args.scisync_port,
         inbound_ports=args.inbound_ports,
         outbound_ports=args.outbound_ports,
@@ -404,18 +404,17 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
 
         app=args.app,
         encrypt=bool(args.encrypt),
-        #splice=args.splice,
         splice=args.splice if args.splice is not None else [],
         parallels=args.parallel,
         time_frames=args.time if is_stream else [],
         file_sizes=args.size if not is_stream else [],
         blocks=args.blocks,
         run_num=args.run,
-
-        local_env="$HOME/Projects/globus_stream/streams-cli/bin/activate",
+        local_env="$HOME/Projects/gstreams",
         remote_env="$HOME/streams-cli/bin/activate",
-        scistream_env="$HOME/seenv-scistream-proto/.seenvstream/bin/activate",
+        scistream_env="$HOME/scistream-proto/.seenvstream/bin/activate",
         report_dir=args.output,
+        proj_dir="$HOME/Projects/gstreams/statkit/results",
     )
 
 # def get_configs() -> list[Config]:

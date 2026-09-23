@@ -53,9 +53,6 @@ def start_iperf_server(
         # )
         cp = popen_subprocess(
             host, cfg.remote_env,
-            #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-            #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
-            
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
             f"globus-streams-launch -p {start_port + (i * 2)} {shlex.quote(stream_id)} "                                    #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -s -p {start_port + (i * 2)} -1 --timestamps --forceflush "                      #f"iperf3 -s -B {cfg.listener_ip} -p {port} -1 --timestamps  --forceflush "
@@ -88,11 +85,9 @@ def start_iperf_client(
     for i, (listen_port, stream_id) in enumerate(zip(reversed(listen_ports), reversed(stream_ids), strict=True)):
     # for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
         file_size = chunk_size + (1 if i < remainder else 0)
-        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 1 -O 10 -t {arg} "
         cp = popen_subprocess(
             host, cfg.remote_env,
-            #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-            #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
             f'sleep {parallel - i}; '
             f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
             
@@ -100,7 +95,7 @@ def start_iperf_client(
             "globus-streams-launch "
             f"{shlex.quote(stream_id)} "                                                    #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -c globus.{shlex.quote(stream_id)} -p {listen_port} "                 #f"iperf3 -c globus.{shlex.quote(tunnel_id)} -B {cfg.initiator_ip} -p {contact_port} "
-            f"-Z -R -P 1 --timestamps --forceflush "
+            f"-Z -R -P 1 "#--timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             
@@ -119,9 +114,10 @@ def start_iperf_client(
         #logging.debug("ISCI: Started iperf3 client on port %d on host %s", (initiate_ap_ports[i]), host.upper())
         time.sleep(1)
 
+    time.sleep(cfg.sleep * 2 + arg)
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
-        time.sleep(cfg.sleep)
+        # time.sleep(cfg.sleep)
         results.append((listen_port, stdout, stderr, cp.returncode))
 
     for listen_port, stdout, stderr, returncode in results:
@@ -189,7 +185,7 @@ def start_iperf_server_base(
             #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
             
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "                #f"numactl --cpunodebind=1 --preferred=1 "
-            f"iperf3 -s -p {start_port + (i * 2)} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
+            f"iperf3 -s -p {start_port + (i * 2)} -1 :" # --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             # f"rc=$?; "
@@ -219,7 +215,7 @@ def start_iperf_client_base(
 
     for i, (listen_port, stream_id) in enumerate(zip(reversed(listen_ports), reversed(stream_ids), strict=True)):
         file_size = chunk_size + (1 if i < remainder else 0)
-        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 1 -O 10 -t {arg} "
         cp = popen_subprocess(
             host, None,
             #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
@@ -229,7 +225,7 @@ def start_iperf_client_base(
             
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -c {listener_pub} -p {listen_port} "                                                #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} "
-            f"-Z -R -P 1 --timestamps --forceflush "
+            f"-Z -R -P 1 "#--timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "            
                         
@@ -248,9 +244,10 @@ def start_iperf_client_base(
         #logging.debug("ISCI: Started iperf3 client on port %d on host %s", (initiate_ap_ports[i]), host.upper())
         time.sleep(1)
 
+    time.sleep(cfg.sleep * 2 + arg)
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
-        time.sleep(cfg.sleep)
+        # time.sleep(cfg.sleep)
         results.append((listen_port, stdout, stderr, cp.returncode))
             
     for listen_port, stdout, stderr, returncode in results:
@@ -315,12 +312,13 @@ def start_iperf_server_scistream(
             #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
             
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "                #f"numactl --cpunodebind=1 --preferred=1 "
-            f"iperf3 -s -p {listen_port} -1 --timestamps --forceflush "                                     #f"iperf3 -s -p {start_ports[i]} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "   f"iperf3 -s -p {listen_ep_ports[i]} -1 --timestamps --forceflush "
+            f"iperf3 -s -p {listen_port} -1 "   # --timestamps --forceflush "                                     #f"iperf3 -s -p {start_ports[i]} -1 --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "   f"iperf3 -s -p {listen_ep_ports[i]} -1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             # f"rc=$?; "
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
-            f'',    # f"exit $rc ",
+            # f"exit $rc ",
+            f'',    
             localhost=cfg.localhost,
         )
         processes.append(cp)
@@ -345,17 +343,15 @@ def start_iperf_client_scistream(
 
     for i, (listen_port, stream_id) in enumerate(zip(reversed(initiate_ap_ports), reversed(stream_ids), strict=True)):
         file_size = chunk_size + (1 if i < remainder else 0)
-        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 10 -O 10 -t {arg} "
+        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 1 -O 10 -t {arg} "
         cp = popen_subprocess(
             host, None,
-            #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
-            #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
             f'sleep {parallel - i}; '
             f"{{ echo \"START $(date '+%Y-%m-%d %H:%M:%S')\"; "
 
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "             #f"numactl --cpunodebind=0 --preferred=0 "
             f"iperf3 -c {listener_pub} -p {listen_port} "                                                #f"iperf3 -c {listener_pub} -B {cfg.initiator_pub} -p {port} " #f"iperf3 -c 128.135.164.120 -p 5100 "
-            f"-Z -R -P 1 --timestamps --forceflush "
+            f"-Z -R -P 1 "#--timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             
@@ -366,7 +362,7 @@ def start_iperf_client_scistream(
             f"> {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.log; "
 
             f"cat {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json 2>/dev/null || true; "
-            f"sleep 1; "
+            # f"sleep 1; "
             f'', # f'exit $(cat {shlex.quote(out_dir)}/{shlex.quote(app)}-rc-{i}) ',
             localhost=cfg.localhost,
         )
@@ -374,9 +370,10 @@ def start_iperf_client_scistream(
         logging.debug("ISCI: Started iperf3 client on port %d on host %s", (initiate_ap_ports[i]), host.upper())
         time.sleep(1)
 
+    time.sleep(cfg.sleep * 2 + arg)
     for cp, listen_port in processes:
         stdout, stderr = cp.communicate()
-        time.sleep(cfg.sleep)
+        # time.sleep(cfg.sleep)
         results.append((listen_port, stdout, stderr, cp.returncode))
             
     for listen_port, stdout, stderr, returncode in results:
@@ -412,3 +409,25 @@ def start_iperf_client_scistream(
         host.upper(), parallel, recv_throughput, recv_duration, sent_retransmissions, recv_bytes_transferred
     )
 
+
+
+
+
+# WASH | InitiatorEPWASH | ~ $ channel 21: open failed: connect failed: open failed
+# channel 23: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# channel 23: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# channel 23: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# channel 23: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# MAX | InitiatorEPMAX | ~ $ channel 21: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed
+# channel 21: open failed: connect failed: open failed

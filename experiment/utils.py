@@ -165,18 +165,19 @@ def initial_cleanup(
     for host in hosts:
         cp = run_subprocess(
             host, None,
-            f'pkill -TERM -x haproxy || true; '
-            f'pkill -TERM -x stunnel || true; '
-            f'pkill -TERM -x nginx || true; '
-            f'pkill -TERM -x s2cs || true; '
-            f'pkill -TERM -x s2uc || true; '
+            f'pkill -TERM haproxy || true; '
+            f'pkill -TERM stunnel || true; '
+            f'pkill -TERM nginx || true; '
+            f'pkill -TERM s2cs || true; '
+            f'pkill -TERM s2uc || true; '
             
-            f'pkill -TERM -x iperf3 || true; '
-            f'pkill -TERM -x rsync || true; '
+            f'pkill -TERM iperf3 || true; '
+            f'pkill -TERM rsync || true; '
             
             r'pkill -TERM -f "monitor/launcher\.py" || true; '
-            f'docker ps -q | xargs -r docker stop; '
-            f'docker ps -aq | xargs -r docker rm; ',
+            # f'docker ps -q | xargs -r docker stop; '
+            # f'docker ps -aq | xargs -r docker rm; ',
+            f'docker ps -q | xargs --no-run-if-empty docker stop && docker container prune -f; ',
             localhost=cfg.localhost,
             timeout=timeout,
         )
@@ -185,7 +186,7 @@ def initial_cleanup(
                 f"INITCLN: Failed initial node's cleaning up the reports on {host.upper()}"
                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
             )
-    logging.info("INITCLN: Finish initial nodes cleanup")
+    logging.info("INITCLN: Initial nodes cleanup")
 
 
 def cleanup_file(cfg: Config, file_path: str = "/tmp/temp_files") -> None:
@@ -214,27 +215,12 @@ def cleanup_file(cfg: Config, file_path: str = "/tmp/temp_files") -> None:
 
 def copy_results(cfg, check: bool = True) -> None:
 
-    if cfg.lease.lower() == "chameleon":
-        hosts = [
-            ("chi-trans-consap", "cons-ap"),
-            ("chi-trans-consep", "cons-ep"),
-            ("chi-trans-prodap", "prod-ap"),
-            ("chi-trans-prodep", "prod-ep"),
-        ]
-    elif cfg.lease.lower() == "fabric":
-        hosts = [
-            ("mfab-c2cs", "cons-ap"),
-            ("mfab-cons", "cons-ep"),
-            ("mfab-p2cs", "prod-ap"),
-            ("mfab-prod", "prod-ep"),
-        ]
-    elif cfg.lease.lower() == "guys":
-        hosts = [
-            ("neat-guy", "cons-ap"),
-            ("that-guy", "prod-ap"),
-            ("swell-guy", "cons-ep"),
-            ("this-guy", "prod-ep"),
-        ]
+    hosts = [
+        (cfg.hosts.ap["initiator"], "cons-ap"),
+        (cfg.hosts.ep["initiator"], "cons-ep"),
+        (cfg.hosts.ap["listener"],  "prod-ap"),
+        (cfg.hosts.ep["listener"],  "prod-ep"),
+    ]
 
     try:
         for numa in cfg.numactl:
@@ -242,7 +228,8 @@ def copy_results(cfg, check: bool = True) -> None:
             test_bed = cfg.lease.lower()
             test_dir = Path(cfg.report_dir).name
             child_dir = f'{numa}/{cfg.tcp_buffer}/{cfg.ring_buffer}'
-            proj_dir		= f"/home/seena/Projects/globus_stream/statkit/results"  
+            # proj_dir		= f"/home/seena/Projects/globus_stream/statkit/results"  
+            proj_dir      = cfg.proj_dir
             base_dir      = f"{proj_dir}/reports/{test_bed}/{test_type}/{test_dir}/{child_dir}"   # root where node folders live
             output_dir    = f"{proj_dir}/analysis/{test_bed}/{test_type}/{test_dir}/{child_dir}"
             report_dir		= f"{proj_dir}/reports/{test_bed}/{test_type}"
@@ -254,7 +241,7 @@ def copy_results(cfg, check: bool = True) -> None:
             for host, dest_name in hosts:
                 cp = run_subprocess(
                     cfg.localhost, None,
-                    f"rsync -av --mkpath --ignore-existing "
+                    f"/opt/homebrew/bin/rsync -av --mkpath --ignore-existing "
                     #f"rsync -avznc --itemize-changes "
                     #f"-e ssh {host}:/tmp/exps/{test_bed}/{test_dir}/{test_type}/{child_dir}/ "
                     f"-e ssh {host}:/tmp/{test_dir}/{test_type}/{child_dir}/ "
@@ -453,13 +440,26 @@ def start_statkit(cfg: Config, timeout : int , app: str, out_dir: str, check: bo
     #     #"apache2",
     # ]
     for host in hosts:
+        # cp = popen_subprocess(
+        #     host, cfg.remote_env,
+        #     f"mkdir -p {shlex.quote(out_dir)} && "
+        #     "pids=$(pgrep -d, -f{shlex.quote('globus-gridftp-server|haproxy|iperf3|rsync|docker'|)} || true); "  #f"pids=$(pgrep -d, -f {shlex.quote(pattern_expr)} || true); "
+        #     #"python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
+        #     f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} --duration {timeout} & "
+        #     f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ", 
+        #     localhost=cfg.localhost,
+        # )
+
+        #pattern = "globus-gridftp-server|haproxy|iperf3|rsync|docker"
+        pattern = "[g]lobus-gridftp-server|[h]aproxy|[i]perf3|[r]sync|[d]ocker"
         cp = popen_subprocess(
             host, cfg.remote_env,
             f"mkdir -p {shlex.quote(out_dir)} && "
-            "pids=$(pgrep -d, -f globus-gridftp-server || true); "  #f"pids=$(pgrep -d, -f {shlex.quote(pattern_expr)} || true); "
-            "python ~/statkit/monitor/launcher.py  --pids \"$pids\" "
-            f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} --duration {timeout} & "
-            f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ", 
+            f"pids=$(pgrep -d, -f {shlex.quote(pattern)} || true); "
+            f"python ~/statkit/monitor/launcher.py --pids \"$pids\" "
+            f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} "
+            f"--duration {timeout} & "
+            f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ",
             localhost=cfg.localhost,
         )
         logging.debug("SYS: Started on statkit on %s %s", host.upper(), cp.stdout)
@@ -509,7 +509,7 @@ def stop_statkit(cfg: Config) -> None:
 
 # def start_tunnel(cfg: Config, initiator_id: str, listener_id: str, lbl: str, timeout: int, check: bool = True) -> str:
 #     cp = run_subprocess(
-#         cfg.localhost, cfg.local_env,
+#         cfg.localhost, None, #cfg.local_env,
 #         "globus streams tunnel create "
 #         "--lifetime-minutes 3600 -v "
 #         f"--label {shlex.quote(lbl)} "
@@ -566,7 +566,7 @@ def stop_statkit(cfg: Config) -> None:
 # def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 100, wait: int = 5) -> tuple[str, str]:
 #     for ret in range(1, retry + 1):
 #         cp = run_subprocess(
-#             cfg.localhost, cfg.local_env,
+#             cfg.localhost, None, #cfg.local_env,
 #             f"globus streams tunnel show {shlex.quote(tunnel_id)}",
 #             localhost=cfg.localhost,
 #             check=False,
@@ -588,7 +588,7 @@ def stop_statkit(cfg: Config) -> None:
 
 # def stop_tunnel(cfg: Config, tunnel_id: str) -> None:
 #     cp = run_subprocess(
-#         cfg.localhost, cfg.local_env,
+#         cfg.localhost, None, #cfg.local_env,
 #         f"globus streams tunnel stop {shlex.quote(tunnel_id)}",
 #         localhost=cfg.localhost,
 #         check=False,
@@ -598,7 +598,7 @@ def stop_statkit(cfg: Config) -> None:
 
 # def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
 #     cp = run_subprocess(
-#         cfg.localhost, cfg.local_env,
+#         cfg.localhost, None, #cfg.local_env,
 #         f"globus streams tunnel delete {shlex.quote(tunnel_id)}",
 #         localhost=cfg.localhost,
 #         check=False,
