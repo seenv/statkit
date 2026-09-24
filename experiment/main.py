@@ -83,8 +83,9 @@ def main() -> None:
             logging.info("MAIN: Finalizing %s experiment. Log file: %s", cfg.test, log_path)
             try:
                 cleanup_file(cfg)
+                initial_cleanup(cfg)
             except Exception:
-                logging.exception("MAIN: File cleanup failed for %s", cfg.test)
+                logging.exception("MAIN: File and app cleanup failed for %s", cfg.test)
             if cfg != configs[-1]:
                 print("MAIN: Sleeping for 30 seconds before the next test")
                 time.sleep(30)

@@ -101,6 +101,19 @@ def _get_container_stats(cfg: Config, host: str, timeout: int, check: bool = Fal
             f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
     return int(cp.stdout.strip())
 
+def _get_containers_names(cfg: Config, host: str, timeout: int, check: bool = False) -> list[str]:
+    cp = run_subprocess(
+        host, None,
+        "docker ps --format '{{.Names}}'",   # names of running containers only
+        localhost=cfg.localhost,
+        timeout=timeout,
+        check=check,
+    )
+    if check and cp.returncode != 0:
+        raise RuntimeError(
+            f"MINI: Failed listing containers on {host.upper()}\n"
+            f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
+    return cp.stdout.split()
 
 def _are_containers_running(cfg, host, parallel, service, timeout, retries):
     total_containers = parallel * 2 if host == cfg.hosts.ep["initiator"] and service == "sirt" else parallel
@@ -120,6 +133,8 @@ def _are_containers_running(cfg, host, parallel, service, timeout, retries):
             return
         if retry < retries:
             time.sleep(cfg.sleep)
+    containers = _get_containers_names(cfg, host, timeout)
+    logging.debug(f"DEBUG: Running containers names: {containers} on {host.capitalize()}")
     raise RuntimeError(f"MINI: Running containers: {status} | {service.upper()} containers didn't start after {retries * cfg.sleep} seconds on {host.capitalize()}")
 
 
@@ -164,6 +179,7 @@ def _start_mini_service(
             cmd = _dist_service(listener_ip, listen_port, file, i)
         elif service == "sirt":
             cmd = _sirt_service(i)
+        time.sleep(.1)
 
         logging.debug(f"DEBUG: Command to run the containers: {wrapper_cmd} {cmd} ")
 
@@ -186,27 +202,6 @@ def _start_mini_service(
             localhost=cfg.localhost,
         )
         launch_processes.append((i, cp))
-
-    # for i, cp in launch_processes:
-    #     try:
-    #         stdout, stderr = cp.communicate(timeout=timeout)
-    #     except subprocess.TimeoutExpired:
-    #         cp.kill()
-    #         stdout, stderr = cp.communicate()
-    #         raise RuntimeError(
-    #             f"MINI: Timed out submitting {service}-{i} "
-    #             f"on {host.upper()}\n"
-    #             f"STDOUT:\n{stdout or ''}\n"
-    #             f"STDERR:\n{stderr or ''}"
-    #         )
-    #     if check and cp.returncode != 0:
-    #         raise RuntimeError(
-    #             f"MINI: Failed submitting {service}-{i} "
-    #             f"on {host.upper()}\n"
-    #             f"Return code: {cp.returncode}\n"
-    #             f"STDOUT:\n{stdout or ''}\n"
-    #             f"STDERR:\n{stderr or ''}"
-    #         )
     logging.info("MINI: Started %s containers on %s", service.upper(), host.upper())
 
 
@@ -246,7 +241,7 @@ def start_mini_app(
         stream_ids, listen_ports, listen_ip, timeout, file, out_dir,
     )
     time.sleep(1)
-    _are_containers_running(cfg, host, parallel, service, timeout, retries)
+    _are_containers_running(cfg, host, parallel, service, timeout, retries=5)
         
     host, service = cfg.hosts.ep["initiator"], "dist"
     logging.debug("MINI: Starting APS mini app's %s service %s", service.capitalize(), host.upper())
@@ -256,7 +251,7 @@ def start_mini_app(
         stream_ids, listen_ports, listen_ip, timeout, file, out_dir,
     )
     time.sleep(1)
-    _are_containers_running(cfg, host, parallel, service, timeout, retries)
+    _are_containers_running(cfg, host, parallel, service, timeout, retries=5)
     time.sleep(cfg.sleep)
 
     host, service = cfg.hosts.ep["initiator"], "sirt"
@@ -266,7 +261,7 @@ def start_mini_app(
         #tunnel_ids, tunnel_ports, initiator_gw_ip, timeout, file, out_dir,
         stream_ids, listen_ports, listen_ip, timeout, file, out_dir,
     )
-    _are_containers_running(cfg, host, parallel, service, timeout, retries)
+    _are_containers_running(cfg, host, parallel, service, timeout, retries=5)
 
     logging.info("MINI: APS mini app containers on the endpoints are online")
     logging.debug("MINI: Started the APS Mini app")
@@ -321,7 +316,7 @@ def prune_containers(
     cfg: Config, parallel: int,
     app: str, out_dir: str,
     timeout: int, 
-    retries: int = 100,
+    retries: int = 5,
     check: bool = False,
 ) -> None:
     for host in cfg.hosts.ep.values():
@@ -330,7 +325,7 @@ def prune_containers(
             if status == 0:
                 cp = run_subprocess(
                     host, None,
-                    'docker ps -q | xargs --no-run-if-empty docker stop && docker container prune -f ',
+                    'docker ps -q | xargs --no-run-if-empty docker stop && docker container prune -f; ',
                     localhost=cfg.localhost,
                     timeout=timeout,
                     check=check,
@@ -341,8 +336,14 @@ def prune_containers(
                         f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
                 break
             elif status != 0 and retry < retries:
+                cp = run_subprocess(
+                    host, None,
+                    f"docker ps -q | xargs --no-run-if-empty docker kill ",
+                    localhost=cfg.localhost,
+                    timeout=timeout,
+                    check=check,
+                )
                 time.sleep(cfg.sleep)
             else:
                 raise RuntimeError(f"MINI: Containers didn't finish after {retries * cfg.sleep} seconds on {host.capitalize()}")
     logging.info("MINI: Pruned APS mini app's containers on the endpoints")
-

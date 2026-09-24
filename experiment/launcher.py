@@ -418,7 +418,7 @@ def run_mini_gst(
         stream_ids, listen_ports, listen_ip = start_globus_streams(
             cfg, parallel, start_port, app_tag, idx, timeout
         )
-
+        time.sleep(cfg.sleep)
         if not cfg.is_test:
             logging.info("MGST: Starting statkit monitoring")
             start_statkit(cfg, timeout, app_tag, output_dir)   #size as duration which will be * 60s
@@ -432,10 +432,8 @@ def run_mini_gst(
 
         if cfg.test == "stream":
             time.sleep(arg)
-            stop_mini_containers(cfg, parallel,app_tag, output_dir, timeout)
-        # else:
-        #     wait_finish_transfer(cfg, parallel,app_tag, output_dir, timeout)
-        #     stop_mini_containers(cfg, parallel,app_tag, output_dir, timeout)
+            stop_mini_containers(cfg, parallel, app_tag, output_dir, timeout)
+            prune_containers(cfg, parallel, app_tag, output_dir, timeout)
 
         if not cfg.is_test:
             logging.info("MGST: Recording RTT")        # it will run on the client
@@ -455,7 +453,7 @@ def run_mini_gst(
         for tunnel in stream_ids:
             status_tunnel(cfg, tunnel, "STOPPED")
             delete_tunnel(cfg, tunnel)
-            
+
 # ------------------------------------------------------------------------------
 # APS Mini App Base        
 def run_mini_base(
@@ -487,7 +485,8 @@ def run_mini_base(
 
         if cfg.test == "stream":
             time.sleep(arg)
-            stop_mini_containers(cfg, parallel,app_tag, output_dir, timeout)
+            stop_mini_containers(cfg, parallel, app_tag, output_dir, timeout)
+            prune_containers(cfg, parallel, app_tag, output_dir, timeout)
 
         if not cfg.is_test:
             logging.info("MBASE: Recording RTT")        # it will run on the client
@@ -521,7 +520,7 @@ def run_mini_scistream(
         stream_ids, listen_ap_ports, initiate_ap_ports, listen_ep_ports, initiate_ep_ports = start_scistream(
             cfg, encrypt, parallel, timeout
         )
-
+        time.sleep(cfg.sleep)
         if not cfg.is_test:
             logging.info("MSCI: Starting the statkit monitoring on the hosts")
             start_statkit(cfg, timeout, app_tag, output_dir)   #size as duration which will be * 60s
@@ -535,10 +534,8 @@ def run_mini_scistream(
 
         if cfg.test == "stream":
             time.sleep(arg)
-            stop_mini_containers(cfg, parallel,app_tag, output_dir, timeout)
-        # else:
-        #     wait_finish_transfer(cfg, parallel,app_tag, output_dir, timeout)
-        #     stop_mini_containers(cfg, parallel,app_tag, output_dir, timeout)
+            stop_mini_containers(cfg, parallel, app_tag, output_dir, timeout)
+            prune_containers(cfg, parallel, app_tag, output_dir, timeout)
 
         if not cfg.is_test:
             logging.info("MSCI: Recording RTT")        # it will run on the client
@@ -553,6 +550,8 @@ def run_mini_scistream(
         if not cfg.is_test:
             logging.info("MSCI: Stopping the statkit monitoring on the hosts")
             stop_statkit(cfg)
+        stop_mini_containers(cfg, parallel, app_tag, output_dir, timeout)
+        prune_containers(cfg, parallel, app_tag, output_dir, timeout)
 
 # ------------------------------------------------------------------------------
 # Main

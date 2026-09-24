@@ -152,17 +152,15 @@ def inbound(
     listener_eps = ",".join(f"{cfg.listener_ap_ip}:{p}" for p in receiver_ports)
     cp = run_subprocess(
         host, cfg.scistream_env,
-        # f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
-        # f"cd \"$HAPROXY_CONFIG_PATH\"; "
         f"mkdir -p /tmp/.scistream && cd /tmp/.scistream; "
-        # f"sleep 1; "
+        f'rm -f /tmp/.scistream/conin-{idx}.log; '
 
-        f's2uc inbound-request --remote_ip {cfg.listener_ip} --num_conn 1 '    #f"s2uc inbound-request --remote_ip 128.135.24.117 --num_conn 5 "
-        f'--receiver_ports={ports_list}  --s2cs  {cfg.listener_ap_ip}:{cfg.scisync_port} --rate 1000000000 ' #{cfg.listener_ap_pub}:{cfg.scisync_port} --rate 1000000000 '    #f"--receiver_ports=5074,5075,5076,5077,5078  --s2cs 128.135.24.119:5007 --rate 100000 "
+        f'PYTHONUNBUFFERED=1 s2uc inbound-request --remote_ip {cfg.listener_ip} --num_conn 1 '                  #f"s2uc inbound-request --remote_ip 128.135.24.117 --num_conn 5 "
+        f'--receiver_ports={ports_list}  --s2cs  {cfg.listener_ap_ip}:{cfg.scisync_port} --rate 1000000000 '    #{cfg.listener_ap_pub}:{cfg.scisync_port} --rate 1000000000 '    #f"--receiver_ports=5074,5075,5076,5077,5078  --s2cs 128.135.24.119:5007 --rate 100000 "
         f"--server_cert=/tmp/.scistream/server.crt "
         f"> /tmp/.scistream/conin-{idx}.log 2>&1 & echo $! >> /tmp/.scistream/inbound.pid; "
+        f"sleep 1; "
         f'while ! grep -q "Listeners:" /tmp/.scistream/conin-{idx}.log; do sleep 1; done; '
-        # f"sleep 1; "
         f"cat /tmp/.scistream/conin-{idx}.log ",
         localhost=cfg.localhost,
     )
@@ -172,11 +170,21 @@ def inbound(
             f"LOCAL: Failed creating the streams tunnel on {cfg.localhost.upper()}\n"
             f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
         )
-    results = cp.stdout   # timeout=60) 
-    _UUID = re.search(r'^([a-fA-F0-9-]{36})\s+.*INVALID_TOKEN PROD', results, re.MULTILINE)
-    stream_uid = _UUID.group(1) if _UUID else None
-    m = re.search(r'^Listeners:\s*\[(.*)\]$', results, re.MULTILINE)
-    # if m:
+    # results = cp.stdout   # timeout=60) 
+    # _UUID = re.search(r'^([a-fA-F0-9-]{36})\s+.*INVALID_TOKEN PROD', results, re.MULTILINE)
+    # stream_uid = _UUID.group(1) if _UUID else None
+    # m = re.search(r'^Listeners:\s*\[(.*)\]$', results, re.MULTILINE)
+
+    results = (cp.stdout or "").replace("\r", "")
+    uid_m = re.search(r'^([0-9a-fA-F-]{36})\s+\S+\s+\S+\s+(?:PROD|CONS)\b', results, re.MULTILINE)
+    stream_uid = uid_m.group(1) if uid_m else stream_uid
+    m = re.search(r'Listeners:\s*\[([^\]]*)\]', results)
+    if not m:
+        raise RuntimeError(
+            f"INBOUND: no 'Listeners:' line from s2uc on {host.upper()} (idx={idx}).\n"
+            f"STDOUT:\n{results}\nSTDERR:\n{cp.stderr}"
+        )
+    
     listeners = re.findall(r"'(\d+\.\d+\.\d+\.\d+):(\d+)'", m.group(1))
     listen_ips = [ip for ip, _ in listeners]
     listen_ports = [int(port) for _, port in listeners]
@@ -199,17 +207,16 @@ def outbound(
 
     cp = run_subprocess(
         host, cfg.scistream_env,
-        # f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
         f'mkdir -p /tmp/.scistream && cd /tmp/.scistream; '
-        # f"sleep 1; "
+        f'rm -f /tmp/.scistream/conout-{idx}.log; '
         
-        f's2uc outbound-request --remote_ip {cfg.listener_ap_pub} --num_conn 1 --rate 1000000000 '              #f"s2uc outbound-request --remote_ip 128.135.164.119 --num_conn 5  --rate 100000 "
+        f'PYTHONUNBUFFERED=1 s2uc outbound-request --remote_ip {cfg.listener_ap_pub} --num_conn 1 '             # f"s2uc outbound-request --remote_ip 128.135.164.119 --num_conn 5  --rate 100000 "
         f'--receiver_ports={ports_list} --s2cs {cfg.initiator_ap_ip}:{cfg.scisync_port} --rate 1000000000 '     #{cfg.initiator_ap_ip}:{cfg.scisync_port} '   #f"--receiver_ports=5100,5101,5102,5103,5104 --s2cs 128.135.37.241:5007 "
         f'{stream_uid} {listener_eps} '                                                                         #f"128.135.164.119:5100,128.135.164.119:5101,128.135.164.119:5102,128.135.164.119:5103,128.135.164.119:5104 "
         f"--server_cert=/tmp/.scistream/server.crt "
         f"> /tmp/.scistream/conout-{idx}.log 2>&1 & echo $! >> /tmp/.scistream/outbound.pid; "
-        f'while ! grep -q "Listeners:" /tmp/.scistream/conout-{idx}.log; do sleep 1; done; '
-        # f"sleep 1; "
+        f"sleep 1; "
+        f'while ! grep -q "Listeners" /tmp/.scistream/conout-{idx}.log; do sleep 1; done; '
         f"cat /tmp/.scistream/conout-{idx}.log ",
         localhost=cfg.localhost,
     )
@@ -218,14 +225,19 @@ def outbound(
             f"LOCAL: Failed creating the streams tunnel on {cfg.localhost.upper()}\n"
             f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
         )
-    results = cp.stdout   # timeout=60) 
-    _UUID = re.search(r'^([a-fA-F0-9-]{36})\s+.*INVALID_TOKEN PROD', results, re.MULTILINE)
-    stream_uid = _UUID.group(1) if _UUID else None
-    m = re.search(r'^Listeners:\s*\[(.*)\]$', results, re.MULTILINE)
-    #if m:
+    results = (cp.stdout or "").replace("\r", "")
+    uid_m = re.search(r'^([0-9a-fA-F-]{36})\s+\S+\s+\S+\s+(?:PROD|CONS)\b', results, re.MULTILINE)
+    stream_uid = uid_m.group(1) if uid_m else stream_uid
+    m = re.search(r'Listeners:\s*\[([^\]]*)\]', results)
+    if not m:
+        raise RuntimeError(
+            f"OUTBOUND: no 'Listeners:' line from s2uc on {host.upper()} (idx={idx}).\n"
+            f"STDOUT:\n{results}\nSTDERR:\n{cp.stderr}"
+        )
     listeners = re.findall(r"'(\d+\.\d+\.\d+\.\d+):(\d+)'", m.group(1))
     listen_ips = [ip for ip, _ in listeners]
     listen_ports = [int(port) for _, port in listeners]
+    logging.debug(f'DEBUG: {results} {listen_ips}')
     logging.debug(f"OUTBOUND: Started outbound connection on {host.upper()}: \n Stream ID: {stream_uid} \n Listener IPs: {listen_ips} \n Ports: {listen_ports}")
     return listen_ips, listen_ports
 

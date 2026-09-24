@@ -16,8 +16,11 @@ def _ssh_base(host: str) -> list[str]:
         "-o", "ConnectionAttempts=10",
         "-o", "ServerAliveInterval=30", 
         "-o", "ServerAliveCountMax=20",
-        "-o", "ControlMaster=no",
-        "-o", "ControlPath=none",
+        # "-o", "ControlMaster=no",
+        # "-o", "ControlPath=none",
+        "-o", "ControlMaster=auto", 
+        "-o", "ControlPath=~/.ssh/cm-%r@%h:%p", 
+        "-o", "ControlPersist=100",
         "-o", "TCPKeepAlive=yes",
         "-o", "LogLevel=ERROR",
         host, "bash", "-lc"
