@@ -55,11 +55,11 @@ def notify(topic: str, title: str, message: str) -> None:
 def send_ntfy(success: bool, cfg: Config, msg: Exception | None = None) -> None:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if success:
-        title = f"Experiment '{cfg.test.capitalize()}' finished"
-        message = (f"\n Lease: {cfg.lease} \n Time: {now} \n Message:{msg}\n")
+        title = f"Experiment '{cfg.tname.capitalize()}' Finished"
+        message = (f"\n Lease: {cfg.lease.capitalize()} \n Time: {now} \n \nMessage: {msg}\n")
     else:
-        title = f"Experiment '{cfg.test.capitalize()}' failed"
-        message = (f"\n Lease: {cfg.lease} \n Time: {now} \n Message:{msg}\n")
+        title = f"Experiment '{cfg.tname.capitalize()}' Failed"
+        message = (f"\n Lease: {cfg.lease.capitalize()} \n Time: {now} \n \nMessage: {msg}\n")
     notify(topic=f"{cfg.test.replace(' ', '-')}", title=title, message=message)
 
 
@@ -201,53 +201,51 @@ def copy_results(cfg, check: bool = True) -> None:
         (cfg.hosts.ep["listener"],  "prod-ep"),
     ]
 
+    test_type  = cfg.test
+    test_bed   = cfg.lease.lower()
+    remote_dir = cfg.report_dir.rstrip("/")     # /tmp/gcs-iperf-mini-test-disk
+    test_dir   = Path(remote_dir).name          # gcs-iperf-mini-test-disk
+    local_root = f"{cfg.proj_dir}/reports/{test_bed}/{test_type}/{test_dir}"
+
     try:
         for numa in cfg.numactl:
-            test_type = cfg.test
-            test_bed = cfg.lease.lower()
-            test_dir = Path(cfg.report_dir).name
-            child_dir = f'{numa}/{cfg.tcp_buffer}/{cfg.ring_buffer}'
-            # proj_dir		= f"/home/seena/Projects/globus_stream/statkit/results"  
-            proj_dir      = cfg.proj_dir
-            base_dir      = f"{proj_dir}/reports/{test_bed}/{test_type}/{test_dir}/{child_dir}"   # root where node folders live
-            output_dir    = f"{proj_dir}/analysis/{test_bed}/{test_type}/{test_dir}/{child_dir}"
-            report_dir		= f"{proj_dir}/reports/{test_bed}/{test_type}"
+            child_dir = f"{numa}/{cfg.tcp_buffer}/{cfg.ring_buffer}"
 
             print(f"TEST_TYPE  : {test_type}")
-            print(f"BASE_DIR    : {base_dir}")
-            print(f"OUTPUT_DIR : {output_dir}")
-        
+            print(f"REMOTE_DIR : {remote_dir}/{test_type}/{child_dir}/")
+            print(f"LOCAL_ROOT : {local_root}")
+
             for host, dest_name in hosts:
+                src = f"{host}:{remote_dir}/{test_type}/{child_dir}/"
+                dst = f"{local_root}/{child_dir}/{dest_name}/"
+
                 cp = run_subprocess(
                     cfg.localhost, None,
                     f"/opt/homebrew/bin/rsync -av --mkpath --ignore-existing "
-                    #f"rsync -avznc --itemize-changes "
-                    #f"-e ssh {host}:/tmp/exps/{test_bed}/{test_dir}/{test_type}/{child_dir}/ "
-                    f"-e ssh {host}:/tmp/{test_dir}/{test_type}/{child_dir}/ "
-                    f"{report_dir}/{test_dir}/{child_dir}/{dest_name}/ " ,
+                    f"-e ssh {src} {dst}",
                     localhost=cfg.localhost,
                 )
                 if check and cp.returncode != 0:
                     raise RuntimeError(
-                        f"COPY: Failed copying the reports on {host.upper()}"
+                        f"COPY: Failed copying the reports from {host.upper()}\n"
                         f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
                     )
 
-            if test_type == "transfer" and "gtr" in cfg.app:
-                cp = run_subprocess(
-                    cfg.localhost, None,
-                    f"rsync -av --mkpath --ignore-existing "
-                    #f"rsync -avznc --itemize-changes "
-                    f"/tmp/exps/{test_bed}/{test_dir}/{test_type}/{child_dir}/ "
-                    f"/tmp/{test_dir}/{test_type}/{child_dir}/ "
-                    f"{report_dir}/{test_dir}/{child_dir}/cons-ep/ ",
-                    localhost=cfg.localhost,
-                )
-                if check and cp.returncode != 0:
-                    raise RuntimeError(
-                        f"COPY: Failed copying the reports on {cfg.localhost.upper()}"
-                        f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
-                    )
+            # TODO: fix it
+            # if test_type == "transfer" and "gtr" in cfg.app:
+            #     cp = run_subprocess(
+            #         cfg.localhost, None,
+            #         f"rsync -av --mkpath --ignore-existing "
+            #         f"/tmp/exps/{test_bed}/{test_dir}/{test_type}/{child_dir}/ "
+            #         f"/tmp/{test_dir}/{test_type}/{child_dir}/ "
+            #         f"{local_root}/cons-ep/{child_dir}/ ",
+            #         localhost=cfg.localhost,
+            #     )
+            #     if check and cp.returncode != 0:
+            #         raise RuntimeError(
+            #             f"COPY: Failed copying the reports on {cfg.localhost.upper()}\n"
+            #             f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+            #         )
     except Exception as e:
         raise RuntimeError(f"COPY: Runtime Error: {e}") from e
 

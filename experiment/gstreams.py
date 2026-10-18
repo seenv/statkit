@@ -121,9 +121,9 @@ def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, che
         extra = (
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|{splice_line}|' "
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|{encrypt_line}|' "
-            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|{buffer_line}|' "
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_GRIDFTP_SERVER_DEBUG[[:space:]]+.*$|$GLOBUS_GRIDFTP_SERVER_DEBUG ALL,{globus_gridftp_debug_log},1,ALL|' "
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_XIO_SYSTEM_DEBUG[[:space:]]+.*$|$GLOBUS_XIO_SYSTEM_DEBUG INFO,{globus_xio_system_debug_log}|' "
+            # f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|{buffer_line}|' "
+            # f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_GRIDFTP_SERVER_DEBUG[[:space:]]+.*$|$GLOBUS_GRIDFTP_SERVER_DEBUG ALL,{globus_gridftp_debug_log},1,ALL|' "
+            # f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_XIO_SYSTEM_DEBUG[[:space:]]+.*$|$GLOBUS_XIO_SYSTEM_DEBUG INFO,{globus_xio_system_debug_log}|' "
         )
         cp = run_subprocess(
             host, None,
@@ -338,7 +338,7 @@ def start_globus_streams(cfg, parallel, start_port, app, idx, timeout) ->  tuple
         logging.info("GST: Creating %d tunnels on Localhost", parallel)
         for i in range(parallel):
             logging.debug("GST: Creating the tunnel # %d tunnels on Localhost", parallel)
-            tunnel_label = f"{cfg.test.replace(' ', '_')}-app{app}-idx{idx}-parallel{i}"
+            tunnel_label = f"{cfg.tname.replace(' ', '_')}-app{app}-idx{idx}-parallel{i}"
             new_tunnel_id = start_tunnel(cfg, initiator_stream_id, listener_stream_id, tunnel_label, timeout)
             stream_ids.append(new_tunnel_id)
 

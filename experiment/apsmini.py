@@ -15,8 +15,10 @@ from remote import run_subprocess, popen_subprocess
 def _daq_service(port: int, file: str, i: int) -> str:
     if file != "tomo_00058_all_subsampled1p_s1079s1081.h5":
         simu_file_path = f"/mnt/{shlex.quote(file)}"
-        mount_drive = f"-v /tmp/mini/{shlex.quote(file)}:/mnt/{shlex.quote(file)}:ro"
-
+        mount_drive = f"-v /home/ubuntu/mini/{shlex.quote(file)}:/mnt/{shlex.quote(file)}:ro"
+    else:
+        simu_file_path =  f"/aps-mini-apps/data/{shlex.quote(file)}"
+        mount_drive = ""
     return (
         f"docker run --rm --network host "
         # f"docker run -d --rm --network host "

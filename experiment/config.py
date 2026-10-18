@@ -84,10 +84,10 @@ def _default_hosts_for_lease(lease: str) -> dict[str, str]:
         }
     elif lease.lower() == "fabric":
         return {
-            "initiator_ap"  : "m-max-ap",
-            "listener_ap"   : "m-wash-ap",
-            "initiator_ep"  : "m-max-ep",
-            "listener_ep"   : "m-wash-ep",
+            "initiator_ap"  : "max-ap",
+            "listener_ap"   : "wash-ap",
+            "initiator_ep"  : "max-ep",
+            "listener_ep"   : "wash-ep",
         }
     elif lease.lower() == "guys":
         return {
@@ -212,6 +212,7 @@ class Config:
     is_test: bool
     lease: str
     test: TestMode
+    tname: str
 
     numactl: Sequence[str]
     tcp_buffer: str
@@ -268,6 +269,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--is-test", action="store_true")
     parser.add_argument("--lease", type=str.lower, required=True, choices=["fabric", "chameleon", "guys"], help="Lease name on the testbed")
     parser.add_argument("--test", type=_parse_test_list, required=True, help="Comma-separated test modes: stream,transfer")
+    parser.add_argument("--tname", type=str, default='test', help="Test's name for differentiation between the sites")
     #parser.add_argument("--proxy", type=_parse_proxy_list, required=True, help="Comma-separated proxy types: apache,stunnel,haproxy")
     parser.add_argument("--userhost", default="localhost", help="Host where the command will execute")
 
@@ -359,6 +361,7 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         is_test=args.is_test,
         lease=args.lease,
         test=test_mode,
+        tname=args.tname,
 
         numactl=args.numactl,
         tcp_buffer=args.tcp_buffer,
@@ -413,7 +416,7 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         local_env="$HOME/Projects/gstreams",
         remote_env="$HOME/streams-cli/bin/activate",
         scistream_env="$HOME/scistream-proto/.seenvstream/bin/activate",
-        report_dir=args.output,
+        report_dir=str(Path(args.output) / args.tname),         # report_dir=args.output,
         proj_dir="$HOME/Projects/gstreams/statkit/results",
     )
 
