@@ -181,7 +181,7 @@ def _start_mini_service(
             cmd = _dist_service(listener_ip, listen_port, file, i)
         elif service == "sirt":
             cmd = _sirt_service(i)
-        time.sleep(.1)
+        time.sleep(.2)
 
         logging.debug(f"DEBUG: Command to run the containers: {wrapper_cmd} {cmd} ")
 
