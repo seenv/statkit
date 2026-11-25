@@ -1,5 +1,7 @@
 __all__ = [
     "controller",
+    "targets",
+    "timesync",
     "cpu_monitor",
     "mem_monitor",
     "disk_monitor",

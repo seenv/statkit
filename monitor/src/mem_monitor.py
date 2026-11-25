@@ -5,18 +5,27 @@ from typing import Optional, Sequence
 
 import psutil
 
+from .targets import TargetResolver
 from .util import CsvLogger, now_mono_s, now_wall_s
 
-# per process memory using pid by RSS/VMS + USS/PSS 
-# RSS and VMS give reak and ram foot print but 
+# per process memory using pid by RSS/VMS + USS/PSS
+# RSS and VMS give real and ram foot print but
 # memory_full_info depends on os/kernel support and permissions
-# on some systems it won’t provide uss/pss
+# on some systems it won't provide uss/pss
 # so the code logs them as None
+#
+# The proc_* sums cover the target processes (--pids, --process-names and
+# their children), re-found every sample, so processes that start after the
+# monitor are included.
+
 
 @dataclass
 class MemMonitorConfig:
     interval_s: float = 1.0
     pids: Optional[Sequence[int]] = None
+    process_names: Optional[Sequence[str]] = None
+    include_children: bool = True
+    recursive_children: bool = True
 
 
 class MemMonitor:
@@ -48,6 +57,12 @@ class MemMonitor:
             ],
             flush_every=1,
         )
+        self._targets = TargetResolver(
+            cfg.pids,
+            cfg.process_names,
+            include_children=cfg.include_children,
+            recursive_children=cfg.recursive_children,
+        )
         self._prev_mono: Optional[float] = None
         self._prev_swap = psutil.swap_memory()
 
@@ -55,14 +70,13 @@ class MemMonitor:
         self.logger.close()
 
     def _proc_mem_sums(self):
-        if not self.cfg.pids:
+        if not self._targets.configured:
             return None, None, None, None
         rss = vms = 0
         uss = pss = 0
         have_uss = have_pss = False
 
-        for pid in self.cfg.pids:
-            pid = int(pid)
+        for pid in self._targets.resolve().pids:
             try:
                 p = psutil.Process(pid)
                 mi = p.memory_info()
@@ -86,6 +100,7 @@ class MemMonitor:
     def sample_once(self) -> None:
         t_wall = now_wall_s()
         t_mono = now_mono_s()
+        self.last_ts = (t_wall, t_mono)  # used for the matching timesync row
         dt = None if self._prev_mono is None else max(0.0, t_mono - self._prev_mono)
         self._prev_mono = t_mono
 
