@@ -17,9 +17,9 @@ from config import (
     _default_hosts_for_lease, _default_ips_for_lease, _default_interfaces_for_lease,
 )
 
-VALID_APPS = ("zgst", "zbase", "zsci")
-APP_TAGS = {"zgst": "zmq_gst", "zbase": "zmq_base", "zsci": "zmq_sci"}
-DEFAULT_SIZES = [2 ** k for k in range(9, 21)]   # 512 B .. 1 MiB
+VALID_APPS = ("zgst", "zsci", "zbase")
+APP_TAGS = {"zgst": "zmq_gst", "zsci": "zmq_sci", "zbase": "zmq_base"}
+DEFAULT_SIZES = [2 ** k for k in range(9, 21)]   # 512 B .. 1 MiB: 512,1028,2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576
 MIN_SAMPLE_SIZE = 256                            # control messages must stay distinguishable
 
 
@@ -97,17 +97,24 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     p.add_argument("--initiator-ap-pub", default=None)
 
     # new ports (no overlap with your other experiments)
-    p.add_argument("--gst-port", type=int, default=60000)
-    p.add_argument("--gst-encrypt-port", type=int, default=60100)
-    p.add_argument("--direct-port", type=int, default=60200)
-    p.add_argument("--sci-inbound-port", type=int, default=60400)
-    p.add_argument("--sci-outbound-port", type=int, default=60600)
-    p.add_argument("--scisync-port", type=int, default=59999)
+    # p.add_argument("--gst-port", type=int, default=60000)
+    # p.add_argument("--gst-encrypt-port", type=int, default=60100)
+    # p.add_argument("--direct-port", type=int, default=60200)
+    # p.add_argument("--sci-inbound-port", type=int, default=60400)
+    # p.add_argument("--sci-outbound-port", type=int, default=60600)
+    # p.add_argument("--scisync-port", type=int, default=59999)
+
+    p.add_argument("--gst-port", type=int, default=5300)
+    p.add_argument("--gst-encrypt-port", type=int, default=5400)
+    p.add_argument("--direct-port", type=int, default=5000)
+    p.add_argument("--sci-inbound-port", type=int, default=5100)
+    p.add_argument("--sci-outbound-port", type=int, default=5200)
+    p.add_argument("--scisync-port", type=int, default=5999)
 
     p.add_argument("--sleep", type=int, default=5)
 
     p.add_argument("--app", type=_parse_app_list, default=list(VALID_APPS),
-                   help="Comma-separated: zgst,zbase,zsci (default: all, run in that order)")
+                   help="Comma-separated: zbase,zgst,zsci (default: all, run in that order)")
     p.add_argument("--encrypt", action="store_true", help="Add the E1 mode (encryption, no splice)")
     p.add_argument("--splice", type=_parse_int_list, default=None, help="Splice modes, e.g. 0,1")
     p.add_argument("--blocks", "-b", type=_parse_int_list, default=[32], help="GridFTP blocksizes (MB)")
@@ -117,11 +124,13 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     p.add_argument("--total-size", type=int, default=10, help="GiB per run (split across streams)")
     p.add_argument("--per-stream", action="store_true", help="--total-size is per stream instead")
     p.add_argument("--run", "-r", type=int, default=10, help="Repetitions")
+    p.add_argument("--start-run", "-sr", type=int, default=1, help="Run number to start from (inclusive), resume at R5 when --run is 10")
+
     p.add_argument("--retries", type=int, default=0, help="PUSH/PULL count-mismatch reruns")
 
     p.add_argument("--pattern", choices=["pubsub", "pushpull"], default="pubsub")
     p.add_argument("--hwm", type=int, default=1000, help="ZeroMQ SNDHWM/RCVHWM (messages)")
-    p.add_argument("--src-dir", default="$HOME/fab-test", help="Dir with zmq_producer/consumer.py on EPs")
+    p.add_argument("--src-dir", default="$HOME/statkit/fab-test", help="Dir with zmq_producer/consumer.py on EPs")
     p.add_argument("--stream-timeout", type=int, default=1800, help="Max seconds per stream test")
     p.add_argument("--start-timeout", type=int, default=300, help="Producer/consumer connect timeout")
     p.add_argument("--idle-timeout", type=int, default=120, help="Consumer max gap between messages")
@@ -130,7 +139,6 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
 
     p.add_argument("--output", "-o", default="/tmp/")
     return p, p.parse_args()
-
 
 def build_config(args: argparse.Namespace) -> tuple[Config, ZmqOpts]:
     hosts = _default_hosts_for_lease(args.lease)
@@ -158,7 +166,7 @@ def build_config(args: argparse.Namespace) -> tuple[Config, ZmqOpts]:
         listener_ap_ip=ip["listener_ap_ip"], listener_ap_pub=ip["listener_ap_pub"],
         initiator_ap_ip=ip["initiator_ap_ip"], initiator_ap_pub=ip["initiator_ap_pub"],
         tunnel_port=args.gst_port, encrypt_port=args.gst_encrypt_port, direct_port=args.direct_port,
-        rsync_port=59300, mini_port=59400, mbase_port=59500, msci_port=59600,   # unused here
+        rsync_port=59300, mini_port=50400, mbase_port=50500, msci_port=50600,   # unused here
         scisync_port=args.scisync_port,
         inbound_ports=[args.sci_inbound_port], outbound_ports=[args.sci_outbound_port],
         tomo_file="",
@@ -166,7 +174,7 @@ def build_config(args: argparse.Namespace) -> tuple[Config, ZmqOpts]:
         app=args.app, encrypt=bool(args.encrypt),
         splice=args.splice if args.splice is not None else [],
         parallels=args.parallel, time_frames=[], file_sizes=[],
-        blocks=args.blocks, run_num=args.run,
+        blocks=args.blocks, run_num=args.run, start_run=args.start_run,
         local_env="$HOME/Projects/gstreams",
         remote_env="$HOME/streams-cli/bin/activate",
         scistream_env="$HOME/scistream-proto/.seenvstream/bin/activate",
@@ -192,6 +200,12 @@ def get_zmq_config() -> tuple[Config, ZmqOpts]:
         parser.error("--run must be >= 1")
     if args.retries < 0:
         parser.error("--retries must be >= 0")
+
+    if args.start_run < 1:
+        parser.error("--start-run must be >= 1")
+    if args.start_run > args.run:
+        parser.error(f"--start-run ({args.start_run}) cannot be greater than --run ({args.run})")
+
     for p in args.parallel:
         per = args.total_size * 1024 ** 3 // (1 if args.per_stream else p)
         if per < max(args.sizes):

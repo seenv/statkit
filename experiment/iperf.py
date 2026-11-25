@@ -32,7 +32,7 @@ def cleanup_iperf(cfg: Config, check: bool = True) -> None:
 def start_iperf_server(
     cfg: Config, host: str, start_port: int, stream_ids: Sequence[str],
     parallel: int, numa: str, out_dir: str, app: str, files: list[str],
-    timeout: int, temp_dir: str = "/tmp/temp_files", retries: int = 100,
+    timeout: int, temp_dir: str = "/tmp/temp_files", retries: int = 10,
     check: bool = True,
 ) -> list[subprocess.Popen[str]]:
     if not (len(stream_ids) == parallel):
@@ -55,7 +55,7 @@ def start_iperf_server(
             host, cfg.remote_env,
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "    #f"numactl --cpunodebind=0 --preferred=0 "
             f"globus-streams-launch -p {start_port + (i * 2)} {shlex.quote(stream_id)} "                                    #f"numactl --cpunodebind=0 --preferred=0 "
-            f"iperf3 -s -p {start_port + (i * 2)} -1 --timestamps --forceflush "                      #f"iperf3 -s -B {cfg.listener_ip} -p {port} -1 --timestamps  --forceflush "
+            f"iperf3 -s -p {start_port + (i * 2)} -1 " #--timestamps --forceflush "                      #f"iperf3 -s -B {cfg.listener_ip} -p {port} -1 --timestamps  --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             # f"rc=$?; "
@@ -70,7 +70,7 @@ def start_iperf_server(
 def start_iperf_client(
     cfg: Config, host: str, stream_ids: Sequence[str], listen_ports: Sequence[int],
     parallel: int, numa: str, arg: int, file: str, app: str, out_dir: str, timeout: int, 
-    temp_dir: str = "/tmp/temp_files", retries: int = 100, check: bool = True,
+    temp_dir: str = "/tmp/temp_files", retries: int = 10, check: bool = True,
 ) -> list[subprocess.CompletedProcess[str]]:
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"IGST: Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
@@ -85,7 +85,7 @@ def start_iperf_client(
     for i, (listen_port, stream_id) in enumerate(zip(reversed(listen_ports), reversed(stream_ids), strict=True)):
     # for i, (listen_port, stream_id) in enumerate(zip(listen_ports, stream_ids)):
         file_size = chunk_size + (1 if i < remainder else 0)
-        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 1 -O 10 -t {arg} "
+        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 1 -t {arg} " #-O 10 "
         cp = popen_subprocess(
             host, cfg.remote_env,
             f'sleep {parallel - i}; '
@@ -185,7 +185,7 @@ def start_iperf_server_base(
             #f"rm -f {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json && "
             
             f"/usr/bin/time -vvv -o {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}-time.log "                #f"numactl --cpunodebind=1 --preferred=1 "
-            f"iperf3 -s -p {start_port + (i * 2)} -1 :" # --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
+            f"iperf3 -s -p {start_port + (i * 2)} -1 " # --timestamps --forceflush "                              #f"iperf3 -s -B {cfg.listener_pub} -p {port} -1 --timestamps --forceflush "
             f"{extra_arg} "
             f"-J --logfile {shlex.quote(out_dir)}/{shlex.quote(app)}-{i}.json; "
             # f"rc=$?; "
@@ -201,7 +201,7 @@ def start_iperf_client_base(
     cfg: Config, host: str, listener_pub: str, stream_ids: Sequence[str], 
     listen_ports: Sequence[int], parallel: int, numa: str, arg: int, 
     file: str,  app: str,  out_dir: str, timeout: int, 
-    temp_dir: str = "/tmp/temp_files", retries: int = 100, check: bool = True,
+    temp_dir: str = "/tmp/temp_files", retries: int = 10, check: bool = True,
 ) -> list[subprocess.CompletedProcess[str]]:
     if not (len(listen_ports) == parallel):
         raise RuntimeError(f"IBASE: Expected all lists to have length parallel={parallel}, but got listen ports={len(listen_ports)}")
@@ -215,7 +215,7 @@ def start_iperf_client_base(
 
     for i, (listen_port, stream_id) in enumerate(zip(reversed(listen_ports), reversed(stream_ids), strict=True)):
         file_size = chunk_size + (1 if i < remainder else 0)
-        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 1 -O 10 -t {arg} "
+        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 1 -t {arg} " #-O 10"
         cp = popen_subprocess(
             host, None,
             #f"mkdir -p {shlex.quote(out_dir)} {shlex.quote(temp_dir)} && "
@@ -288,7 +288,7 @@ def start_iperf_client_base(
 def start_iperf_server_scistream(
     cfg: Config, host: str, listen_ep_ports: Sequence[int], stream_ids: Sequence[str],
     parallel: int, numa: str, out_dir: str, app: str, files: list[str],
-    timeout: int, temp_dir: str = "/tmp/temp_files", retries: int = 100,
+    timeout: int, temp_dir: str = "/tmp/temp_files", retries: int = 10,
     check: bool = True,
 ) -> list[subprocess.Popen[str]]:
     if not (len(stream_ids) == parallel):
@@ -329,7 +329,7 @@ def start_iperf_client_scistream(
     cfg: Config, host: str, listener_pub: str, stream_ids: Sequence[str], 
     initiate_ap_ports: Sequence[int], parallel: int, numa: str, 
     arg: int, file: str, app: str,  out_dir: str, timeout: int, 
-    temp_dir: str = "/tmp/temp_files",retries: int = 100, check: bool = True,
+    temp_dir: str = "/tmp/temp_files",retries: int = 10, check: bool = True,
 ) -> list[subprocess.CompletedProcess[str]]:
     if not (len(initiate_ap_ports) == parallel):
         raise RuntimeError(f"ISCI: Expected all lists to have length parallel={parallel}, but got listen ports={len(initiate_ap_ports)}")
@@ -343,7 +343,7 @@ def start_iperf_client_scistream(
 
     for i, (listen_port, stream_id) in enumerate(zip(reversed(initiate_ap_ports), reversed(stream_ids), strict=True)):
         file_size = chunk_size + (1 if i < remainder else 0)
-        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 1 -O 10 -t {arg} "
+        extra_arg = f"-n {file_size} " if cfg.test == "transfer" else f"-i 1 -t {arg} " #-O 10"
         cp = popen_subprocess(
             host, None,
             f'sleep {parallel - i}; '

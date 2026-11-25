@@ -41,12 +41,20 @@ def main() -> None:
             traceback_text = traceback.format_exc()
             logging.exception("MAIN: %s experiment failed. Log file: %s", cfg.test, log_path)
 
+            # try:
+            #     notif_err = RuntimeError(
+            #         f"{type(exc).__name__}: {exc}\n\n"
+            #         f"{traceback_text[-3000:]}"
+            #     )
+            #     send_ntfy(success=False, cfg=cfg, msg=notif_err)
+            # except Exception:
+            #     logging.exception("MAIN: Failed to send failure notification for %s: %s", cfg.test, cfg.tname)
             try:
-                notif_err = RuntimeError(
-                    f"{type(exc).__name__}: {exc}\n\n"
-                    f"{traceback_text[-3000:]}"
-                )
-                send_ntfy(success=False, cfg=cfg, msg=notif_err)
+                log_file = f"/tmp/{cfg.tname}_traceback.txt"
+                with open(log_file, "w") as f:
+                    f.write(traceback_text)
+                notif_err = RuntimeError(f"{type(exc).__name__}: {exc}")
+                send_ntfy(success=False, cfg=cfg, msg=notif_err, file=log_file)
             except Exception:
                 logging.exception("MAIN: Failed to send failure notification for %s: %s", cfg.test, cfg.tname)
             

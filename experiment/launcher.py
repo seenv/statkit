@@ -145,7 +145,7 @@ def run_iperf_base(
 def run_iperf_scistream(
     cfg: Config, *, idx: int, total_runs: int, timeout: int, parallel: int, 
     arg: int, files: list[str], start_port: int, listener_host: str, 
-    initiator_host: str, numa: str, output_dir: str, encrypt: int, app_tag: str,
+    initiator_host: str, numa: str, output_dir: str, encrypt: int, splice=int, app_tag: str,
 ) -> None:
     
     logging.info("")
@@ -156,7 +156,7 @@ def run_iperf_scistream(
     try:
         logging.info("ISCI: Creating %d SciStream tunnels ", parallel)
         stream_ids, listen_ap_ports, initiate_ap_ports, listen_ep_ports, initiate_ep_ports = start_scistream(
-            cfg, encrypt, parallel, timeout
+            cfg, encrypt, splice, parallel, timeout
         )
 
         if not cfg.is_test:
@@ -313,7 +313,7 @@ def run_rsync_base(
 def run_rsync_scistream(
     cfg: Config, *, idx: int, total_runs: int, timeout: int, parallel: int, 
     arg: int, files: list[str], start_port: int, listener_host: str, 
-    initiator_host: str, numa: str, output_dir: str, encrypt: int, app_tag: str,
+    initiator_host: str, numa: str, output_dir: str, encrypt: int, splice=int, app_tag: str,
 ) -> None:
     
     logging.info("")
@@ -324,7 +324,7 @@ def run_rsync_scistream(
     try:
         logging.info("RSCI: Creating %d SciStream tunnels ", parallel)
         stream_ids, listen_ap_ports, initiate_ap_ports, listen_ep_ports, initiate_ep_ports = start_scistream(
-            cfg, encrypt, parallel, timeout
+            cfg, encrypt, splice, parallel, timeout
         )
 
         if not cfg.is_test:
@@ -458,23 +458,23 @@ def run_mini_gst(
 # APS Mini App Base        
 def run_mini_base(
     cfg: Config, *, idx: int, total_runs: int, timeout: int, tomo_file: str, 
-    parallel: int, arg: int, 
-    start_port: int, listener_host: str, initiator_host: str, numa: str, output_dir: str,
-    encrypt: int, app_tag: str,
+    parallel: int, arg: int, start_port: int, listener_host: str, initiator_host: str, 
+    numa: str, output_dir: str, encrypt: int, app_tag: str,
 ) -> None:
     logging.info("")
     logging.info("--------------- Tests %d / %d: Starting APS mini app Direct Tests ---------------", idx, total_runs)
     stream_ids, listen_ports = [], []
     listen_ip = cfg.listener_pub
     try:
+        for i in range(parallel):
+            listen_ports.append(start_port + (i * 2))
+            stream_ids.append(listen_ip)
+
+        time.sleep(cfg.sleep)
         if not cfg.is_test:
             logging.info("MBASE: Starting statkit monitoring")
             start_statkit(cfg, timeout, app_tag, output_dir)   #size as duration which will be * 60s
             time.sleep(cfg.sleep)
-
-        for i in range(parallel):
-            listen_ports.append(start_port + (i * 2))
-            stream_ids.append(listen_ip)
 
         logging.info("MBASE: Starting APS mini app containers")
         start_mini_app(
@@ -507,7 +507,7 @@ def run_mini_base(
 def run_mini_scistream(
     cfg: Config, *, idx: int, total_runs: int, timeout: int, tomo_file: str, 
     parallel: int, arg: int, start_port: int, listener_host: str, initiator_host: str, 
-    numa: str, output_dir: str, encrypt: int, app_tag: str,
+    numa: str, output_dir: str, encrypt: int,  splice=int, app_tag: str,
 ) -> None:
     
     logging.info("")
@@ -518,7 +518,7 @@ def run_mini_scistream(
     try:
         logging.info("MSCI: Creating %d SciStream tunnels ", parallel)
         stream_ids, listen_ap_ports, initiate_ap_ports, listen_ep_ports, initiate_ep_ports = start_scistream(
-            cfg, encrypt, parallel, timeout
+            cfg, encrypt, splice, parallel, timeout
         )
         time.sleep(cfg.sleep)
         if not cfg.is_test:
@@ -562,18 +562,33 @@ def experiment_main(cfg: Config) -> None:
     numactl = cfg.numactl
     net_modes = build_net_modes(cfg.splice, cfg.encrypt)
     runs = cfg.run_num
+    start_run = cfg.start_run
     test_config = (
         (numa, block, parallel, arg, splice, encrypt, run)
         for numa in numactl
         for block in blocks
         for parallel in parallels
         for arg in args
+        # for splice, encrypt in net_modes
+        # for run in range(1, runs + 1)
+        #for run in range(1, runs + 1)
+        for run in range(start_run, runs + 1)
         for splice, encrypt in net_modes
-        for run in range(1, runs + 1)
     )
+    # test_config = (
+    #     (numa, block, parallel, arg, splice, encrypt, run)
+    #     for numa in numactl
+    #     for block in blocks
+    #     for arg in args
+    #     for splice, encrypt in net_modes
+    #     for run in range(1, runs + 1)
+    #     for parallel in parallels      # innermost: changes every iteration
+    # )
 
     last_block, last_splice, last_encrypt = None, None, None
-    total_runs = (len(numactl) * len(blocks) * len(parallels) * len(args) * len(net_modes) * runs)
+    # total_runs = (len(numactl) * len(blocks) * len(parallels) * len(args) * len(net_modes) * runs)
+    num_runs = runs - start_run + 1
+    total_runs = (len(numactl) * len(blocks) * len(parallels) * len(args) * len(net_modes) * num_runs)
     tests_per_config = sum(
         (
             "iperf" in cfg.app,
@@ -609,11 +624,12 @@ def experiment_main(cfg: Config) -> None:
             logging.info("")
             logging.info(
                 "--------------- Test: %s: No %d - %d | %d / NUMA %s / blocksize %s / parallel %s / arg %s / splice %s / encrypt %s / run %s ---------------",
-                cfg.test.capitalize(), test_idx + 1, test_idx + tests_per_config + 1, total_tests,  numa, block, parallel, arg, splice, encrypt, run, 
+                cfg.test.capitalize(), test_idx + 1, test_idx + tests_per_config, total_tests,  numa, block, parallel, arg, splice, encrypt, run, 
             )
             logging.info("")
 
-            if idx == 1 and (not(cfg.is_test)):
+            # if idx == 1 and (not(cfg.is_test)):
+            if idx == 1 and not cfg.is_test and cfg.start_run == 1:
                 logging.info("SYS: Recording the system reports")
                 sys_dir = (Path(cfg.report_dir) / f"{cfg.test}" / f"{numa}" / f"{cfg.tcp_buffer}" / f"{cfg.ring_buffer}" / "sys-info")
                 sys_report_dir = str(sys_dir)
@@ -636,57 +652,52 @@ def experiment_main(cfg: Config) -> None:
                 )
                 output_dir = str(output_path)
 
-            timeout = (arg * 120) * 10
-            create_output_dir(cfg, output_dir, timeout)
-
-            if "iperf" in cfg.app:
-                    test_idx += 1
-                    last_block, last_splice, last_encrypt = check_gridftp_config(
-                        cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, output_dir
-                    )
-                    start_port = cfg.encrypt_port if encrypt else cfg.tunnel_port
-                    run_iperf_gst(
-                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                        parallel=parallel, arg=arg, files=files, start_port=start_port,
-                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                        numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="iperf_gst",
-                    )
-                    time.sleep(cfg.sleep)
-
-            if "ibase" in cfg.app:
-                    test_idx += 1
-                    start_port = cfg.direct_port
-                    run_iperf_base(
-                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                        parallel=parallel, arg=arg, files=files, start_port=start_port,
-                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                        numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="iperf_base",
-                    )
-                    time.sleep(cfg.sleep)
-
-            if "sperf" in cfg.app:
-                    test_idx += 1   
-                    run_iperf_scistream(
-                        cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                        parallel=parallel, arg=arg, files=files, start_port=cfg.inbound_ports[0],
-                        listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                        numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="iperf_sci"
-                    )
-                    time.sleep(cfg.sleep)
-                
-            if "rsync" in cfg.app and cfg.test == "transfer":
-                test_idx += 1
+            cur_conf = (block, splice, encrypt)
+            if "iperf" in cfg.app and cur_conf != (last_block, last_splice, last_encrypt):
                 last_block, last_splice, last_encrypt = check_gridftp_config(
                     cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, output_dir
                 )
-                start_port=cfg.rsync_port
-                run_rsync_gst(
+                time.sleep(cfg.sleep)
+
+            timeout = (arg * 5)
+            create_output_dir(cfg, output_dir, timeout)
+
+            if "iperf" in cfg.app:
+                test_idx += 1
+                # last_block, last_splice, last_encrypt = check_gridftp_config(
+                #     cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, output_dir
+                # )
+                start_port = cfg.encrypt_port if encrypt else cfg.tunnel_port
+                run_iperf_gst(
                     cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
                     parallel=parallel, arg=arg, files=files, start_port=start_port,
                     listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="rsync_gst",
+                    numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="iperf_gst",
                 )
+                time.sleep(1)
 
+            if "sperf" in cfg.app:
+                test_idx += 1   
+                run_iperf_scistream(
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    parallel=parallel, arg=arg, files=files, start_port=cfg.inbound_ports[0],
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir, encrypt=encrypt, splice=splice, app_tag="iperf_sci"
+                )
+                time.sleep(1)
+
+            if "ibase" in cfg.app:
+                test_idx += 1
+                start_port = cfg.direct_port
+                run_iperf_base(
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    parallel=parallel, arg=arg, files=files, start_port=start_port,
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="iperf_base",
+                )
+                time.sleep(1)
+
+            # Rsync
             if "rbase" in cfg.app and cfg.test == "transfer":
                 test_idx += 1
                 start_port = cfg.rsync_port
@@ -696,7 +707,7 @@ def experiment_main(cfg: Config) -> None:
                     listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                     numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="rsync_base"
                 )
-                time.sleep(cfg.sleep)
+                time.sleep(1)
 
             if 'ssync' in cfg.app and cfg.test == 'transfer':
                 test_idx += 1
@@ -705,10 +716,25 @@ def experiment_main(cfg: Config) -> None:
                     cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
                     parallel=parallel, arg=arg, files=files, start_port=start_port,
                     listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="rsync_base"
+                    numa=numa, output_dir=output_dir, encrypt=encrypt, splice=splice, app_tag="rsync_base"
                 )
-                time.sleep(cfg.sleep)
+                time.sleep(1)
 
+            if "rsync" in cfg.app and cfg.test == "transfer":
+                test_idx += 1
+                # last_block, last_splice, last_encrypt = check_gridftp_config(
+                #     cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, output_dir
+                # )
+                start_port=cfg.rsync_port
+                run_rsync_gst(
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    parallel=parallel, arg=arg, files=files, start_port=start_port,
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="rsync_gst",
+                )
+                time.sleep(1)
+
+            # Globus Transfer
             if "gtr" in cfg.app and cfg.test == "transfer":
                 test_idx += 1
                 logging_gridftp(cfg, output_dir)
@@ -721,14 +747,14 @@ def experiment_main(cfg: Config) -> None:
                     listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                     numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="globus_gtr"
                 )
-                time.sleep(cfg.sleep)
+                time.sleep(1)
 
+            # Mini Apps
             if "mini" in cfg.app and cfg.test == "stream":
                 test_idx += 1
-                last_block, last_splice, last_encrypt = check_gridftp_config(
-                    cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, output_dir
-                )
-
+                # last_block, last_splice, last_encrypt = check_gridftp_config(
+                #     cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, output_dir
+                # )
                 start_port = cfg.mini_port
                 run_mini_gst(
                     cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
@@ -736,7 +762,19 @@ def experiment_main(cfg: Config) -> None:
                     listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                     numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="mini_gst",
                 )
-                
+                time.sleep(1)
+
+            if "msci" in cfg.app and cfg.test == "stream":
+                test_idx += 1   
+                start_port = cfg.mini_port
+                run_mini_scistream(
+                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
+                    tomo_file=cfg.tomo_file, parallel=parallel, arg=arg, start_port=start_port,
+                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
+                    numa=numa, output_dir=output_dir, encrypt=encrypt, splice=splice, app_tag="mini_sci",
+                )
+                time.sleep(1)
+
             if "mbase" in cfg.app and cfg.test == "stream":
                 test_idx += 1
                 start_port = cfg.mini_port
@@ -746,16 +784,8 @@ def experiment_main(cfg: Config) -> None:
                     listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
                     numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="mini_base",
                 )
+                time.sleep(1)
 
-            if "msci" in cfg.app and cfg.test == "stream":
-                test_idx += 1   
-                start_port = cfg.mini_port
-                run_mini_scistream(
-                    cfg, idx=test_idx, total_runs=total_tests, timeout=timeout,
-                    tomo_file=cfg.tomo_file, parallel=parallel, arg=arg, start_port=start_port,
-                    listener_host=cfg.hosts.ep["listener"], initiator_host=cfg.hosts.ep["initiator"],
-                    numa=numa, output_dir=output_dir, encrypt=encrypt, app_tag="mini_sci",
-                )
 
             if cfg.test == "transfer":
                 try:

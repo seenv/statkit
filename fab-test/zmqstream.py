@@ -121,10 +121,10 @@ def delete_app_files(cfg: Config, out_dir: str, app_tag: str) -> None:
 # Statkit (no --duration; started/stopped explicitly around each stream)
 _STATKIT_PATTERN = "[g]lobus-gridftp-server|[h]aproxy|[i]perf3|[r]sync|[d]ocker"
 
-
 def start_statkit_zmq(cfg: Config, app: str, out_dir: str) -> None:
     q, a = shlex.quote(out_dir), shlex.quote(app)
     for host in _all_hosts(cfg):
+
         run_subprocess(
             host, cfg.remote_env,
             f"mkdir -p {q} && "
@@ -134,7 +134,7 @@ def start_statkit_zmq(cfg: Config, app: str, out_dir: str) -> None:
             f"echo $! > {q}/{a}-launcher.pid",
             localhost=cfg.localhost,
         )
-    logging.debug("ZMQ: Started statkit (%s) on all hosts", app)
+    logging.info("ZMQ: Started statkit (%s) on all hosts", app)
 
 
 def check_statkit_alive(cfg: Config, app: str, out_dir: str) -> None:
@@ -151,7 +151,7 @@ def stop_statkit_zmq(cfg: Config) -> None:
         run_subprocess(host, None, r"pkill -TERM -f 'monitor/launcher\.py' || true",
                        localhost=cfg.localhost)
     time.sleep(1)
-    logging.debug("ZMQ: Stopped statkit on all hosts")
+    logging.info("ZMQ: Stopped statkit on all hosts")
 
 
 # ------------------------------------------------------------------------------
@@ -279,21 +279,54 @@ def run_stream(cfg: Config, opts: ZmqOpts, *, app_tag: str, out_dir: str, sample
 
 # ------------------------------------------------------------------------------
 # Copy results back (only called after the whole test succeeded)
+# def copy_zmq_results(cfg: Config, opts: ZmqOpts) -> None:
+#     hosts = [
+#         (cfg.hosts.ap["initiator"], "cons-ap"),
+#         (cfg.hosts.ep["initiator"], "cons-ep"),
+#         (cfg.hosts.ap["listener"], "prod-ap"),
+#         (cfg.hosts.ep["listener"], "prod-ep"),
+#     ]
+#     # remote_dir = f"{cfg.report_dir.rstrip('/')}/{cfg.test}/zmq/"
+#     # local_root = f"{cfg.proj_dir}/reports/{cfg.lease.lower()}/{cfg.test}/{Path(cfg.report_dir).name}/zmq"
+#     #remote_dir = f"{cfg.report_dir.rstrip('/')}/{cfg.pattern}"
+#     remote_dir = f"{cfg.report_dir.rstrip('/')}/"
+#     local_root = f"{cfg.proj_dir}/reports/{cfg.lease.lower()}/{cfg.test}/{cfg.tname}"
+#     for host, dest in hosts:
+#         cp = run_subprocess(
+#             cfg.localhost, None,
+#             # rsync -av --mkpath --ignore-existing -e ssh max-ap:/tmp/max-wash-zmq/zmq-pushpull 
+#             # $HOME/Projects/gstreams/statkit/results/reports/fabric/stream/max-wash-zmq/cons-ap/
+#             f"{opts.local_rsync} -av --mkpath --ignore-existing -e ssh "
+#             f"{host}:{remote_dir} {local_root}/{dest}/",
+#             localhost=cfg.localhost,
+#         )
+#         logging.debug("COPY: %s -> %s/%s\n%s", host, local_root, dest, cp.stdout[-500:])
+#     logging.info("COPY: Results copied to %s", local_root)
 def copy_zmq_results(cfg: Config, opts: ZmqOpts) -> None:
-    hosts = [
-        (cfg.hosts.ap["initiator"], "cons-ap"),
-        (cfg.hosts.ep["initiator"], "cons-ep"),
-        (cfg.hosts.ap["listener"], "prod-ap"),
-        (cfg.hosts.ep["listener"], "prod-ep"),
-    ]
-    remote_dir = f"{cfg.report_dir.rstrip('/')}/{cfg.test}/zmq/"
-    local_root = f"{cfg.proj_dir}/reports/{cfg.lease.lower()}/{cfg.test}/{Path(cfg.report_dir).name}/zmq"
-    for host, dest in hosts:
-        cp = run_subprocess(
-            cfg.localhost, None,
-            f"{opts.local_rsync} -av --mkpath --ignore-existing -e ssh "
-            f"{host}:{remote_dir} {local_root}/{dest}/",
-            localhost=cfg.localhost,
-        )
-        logging.debug("COPY: %s -> %s/%s\n%s", host, local_root, dest, cp.stdout[-500:])
-    logging.info("COPY: Results copied to %s", local_root)
+    try:
+        hosts = [
+            (cfg.hosts.ap["initiator"], "cons-ap"),
+            (cfg.hosts.ep["initiator"], "cons-ep"),
+            (cfg.hosts.ap["listener"], "prod-ap"),
+            (cfg.hosts.ep["listener"], "prod-ep"),
+        ]
+        # remote_dir = f"{cfg.report_dir.rstrip('/')}/{cfg.test}/zmq/"
+        # local_root = f"{cfg.proj_dir}/reports/{cfg.lease.lower()}/{cfg.test}/{Path(cfg.report_dir).name}/zmq"
+        #remote_dir = f"{cfg.report_dir.rstrip('/')}/{cfg.pattern}"
+        remote_dir = f"{cfg.report_dir.rstrip('/')}/"
+        local_root = f"{cfg.proj_dir}/reports/{cfg.lease.lower()}/{cfg.test}/{cfg.tname}"
+        for host, dest in hosts:
+            cp = run_subprocess(
+                cfg.localhost, None,
+                # rsync -av --mkpath --ignore-existing -e ssh max-ap:/tmp/max-wash-zmq/zmq-pushpull 
+                # $HOME/Projects/gstreams/statkit/results/reports/fabric/stream/max-wash-zmq/cons-ap/
+                f"{opts.local_rsync} -av --mkpath --ignore-existing -e ssh "
+                f"{host}:{remote_dir} {local_root}/{dest}/",
+                localhost=cfg.localhost,
+            )
+            if cp.returncode != 0:
+                raise RuntimeError(f"rsync from {host} failed (rc={cp.returncode}): {cp.stderr[-500:]}")
+            logging.debug("COPY: %s -> %s/%s\n%s", host, local_root, dest, cp.stdout[-500:])
+        logging.info("COPY: Results copied to %s", local_root)
+    except Exception as e:
+        raise RuntimeError(f"COPY: Runtime Error: {e}") from e

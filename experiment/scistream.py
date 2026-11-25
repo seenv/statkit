@@ -66,7 +66,7 @@ def _key_gen(cfg: Config, host: str,check: bool = True,) -> tuple[str | None, st
         f'IP:128.135.11.192'
         '"; '
         'cat /tmp/.scistream/server.crt /tmp/.scistream/server.key > /tmp/.scistream/stream.pem; '
-        #ls.f"chmod 600 \"$HAPROXY_CONFIG_PATH\"/stream.pem; "
+        #ls.f"chmod 600 /tmp/.scistream/stream.pem; "
         f"cat /tmp/.scistream/stream.pem; ",
         localhost=cfg.localhost,
     )
@@ -89,13 +89,14 @@ def _key_dist(cfg: Config, hosts: list[str], key: str, crt: str,check: bool = Tr
         cp = run_subprocess(
             host, None,
             #f"[[ -z \"$HAPROXY_CONFIG_PATH\" ]] && "
-            f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
+            #f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
+            f"mkdir -p /tmp/.scistream; "
             f"sleep 1; "
 
-            f"echo {shlex.quote(crt)} > \"$HAPROXY_CONFIG_PATH\"/server.crt; "   # printf '%s' 
-            f"echo {shlex.quote(key)} > \"$HAPROXY_CONFIG_PATH\"/server.key; "
-            f"cat \"$HAPROXY_CONFIG_PATH\"/server.crt \"$HAPROXY_CONFIG_PATH\"/server.key > \"$HAPROXY_CONFIG_PATH\"/stream.pem; "
-            f"chmod 600 \"$HAPROXY_CONFIG_PATH\"/stream.pem ",
+            f"echo {shlex.quote(crt)} > /tmp/.scistream/server.crt; "   # printf '%s' 
+            f"echo {shlex.quote(key)} > /tmp/.scistream/server.key; "
+            f"cat /tmp/.scistream/server.crt /tmp/.scistream/server.key > /tmp/.scistream/stream.pem; "
+            f"chmod 600 /tmp/.scistream/stream.pem ",
             localhost=cfg.localhost,
         )
         if check and cp.returncode != 0:
@@ -118,24 +119,25 @@ def _check_proxy_config(cfg, stream_uid):
 # S2CS
 def start_s2cs(
     cfg: Config, host: str, listener_ip: str, sync_port: int, port_range: str, 
-    timeout: int, scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True
+    timeout: int, scistream_dir: str = "/tmp/.scistream", retries: int = 10, check: bool = True
 ) -> None:
     # have to run s2cs with timeout since it creates a zombie, and without timeout
     # the zombie process will remain and won't let the transfer to happen!!!
     # figure out why and how to fix it!?
     cp = run_subprocess(
         host, cfg.scistream_env,
-        f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
+        #f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
+        f"mkdir -p {shlex.quote(scistream_dir)}; "
         #f"timeout 60s "
         f"setsid stdbuf -oL -eL "
         f"timeout 5 s2cs --verbose --port={cfg.scisync_port} --listener_ip={shlex.quote(listener_ip)} "     # f"s2cs --verbose --port={cfg.scisync_port} --listener_ip=128.135.37.241 "
         f"--port_range {port_range} "
-        f"--server_crt=\"$HAPROXY_CONFIG_PATH\"/server.crt "
-        f"--server_key=\"$HAPROXY_CONFIG_PATH\"/server.key "
-        f"--type=HaproxySubprocess > \"$HAPROXY_CONFIG_PATH\"/s2cs.log 2>&1 & "
+        f"--server_crt=/tmp/.scistream/server.crt "
+        f"--server_key=/tmp/.scistream/server.key "
+        f"--type=HaproxySubprocess > /tmp/.scistream/s2cs.log 2>&1 & "
         #f'sleep 5; '
-        f"echo $! > \"$HAPROXY_CONFIG_PATH\"/s2cs.pid; "
-        #f"sleep 1 && cat \"$HAPROXY_CONFIG_PATH\"/s2cs.log ",
+        f"echo $! > /tmp/.scistream/s2cs.pid; "
+        #f"sleep 1 && cat /tmp/.scistream/s2cs.log ",
         f"",
         localhost=cfg.localhost,
     )
@@ -146,7 +148,7 @@ def start_s2cs(
 # Inbound connection on Listener EP
 def inbound(
     cfg: Config, host: str, receiver_ports: Sequence[int], remote_ip: str, s2cs_ip: str, sync_port: int, 
-    parallel: int, timeout: int, idx: int,scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True,
+    parallel: int, timeout: int, idx: int,scistream_dir: str = "/tmp/.scistream", retries: int = 10, check: bool = True,
 ) -> tuple[Optional[str], Sequence[str]]:
     ports_list = ",".join(str(p) for p in receiver_ports)
     listener_eps = ",".join(f"{cfg.listener_ap_ip}:{p}" for p in receiver_ports)
@@ -160,7 +162,9 @@ def inbound(
         f"--server_cert=/tmp/.scistream/server.crt "
         f"> /tmp/.scistream/conin-{idx}.log 2>&1 & echo $! >> /tmp/.scistream/inbound.pid; "
         f"sleep 1; "
-        f'while ! grep -q "Listeners:" /tmp/.scistream/conin-{idx}.log; do sleep 1; done; '
+        #f'while ! grep -q "Listeners:" /tmp/.scistream/conin-{idx}.log; do sleep 1; done; '
+        #f'for t in $(seq 1 {timeout}); do grep -q "Listeners:" /tmp/.scistream/conin-{idx}.log && break; sleep 1; done; '
+        f'for t in $(seq 1 10); do grep -q "Listeners:" /tmp/.scistream/conin-{idx}.log && break; sleep 1; done; '
         f"cat /tmp/.scistream/conin-{idx}.log ",
         localhost=cfg.localhost,
     )
@@ -170,10 +174,6 @@ def inbound(
             f"LOCAL: Failed creating the streams tunnel on {cfg.localhost.upper()}\n"
             f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
         )
-    # results = cp.stdout   # timeout=60) 
-    # _UUID = re.search(r'^([a-fA-F0-9-]{36})\s+.*INVALID_TOKEN PROD', results, re.MULTILINE)
-    # stream_uid = _UUID.group(1) if _UUID else None
-    # m = re.search(r'^Listeners:\s*\[(.*)\]$', results, re.MULTILINE)
 
     results = (cp.stdout or "").replace("\r", "")
     uid_m = re.search(r'^([0-9a-fA-F-]{36})\s+\S+\s+\S+\s+(?:PROD|CONS)\b', results, re.MULTILINE)
@@ -197,7 +197,7 @@ def inbound(
 def outbound(
     cfg: Config, host: str, stream_uid: str, remote_ip: str, receiver_ap_ip: str, 
     receiver_ports: Sequence[int], s2cs_ip: str, sync_port: int, parallel: int, 
-    timeout: int, idx: int, scistream_dir: str = "/tmp/.scistream", retries: int = 100, check: bool = True,
+    timeout: int, idx: int, scistream_dir: str = "/tmp/.scistream", retries: int = 10, check: bool = True,
 ) -> None:
     #if not stream_uid or not (len(receiver_ports) == parallel):
     #    raise RuntimeError(f"OUTBOUND: Expected all lists to have length parallel={parallel}: {len(receiver_ports)},and a Stream UID: {stream_uid}")
@@ -216,7 +216,9 @@ def outbound(
         f"--server_cert=/tmp/.scistream/server.crt "
         f"> /tmp/.scistream/conout-{idx}.log 2>&1 & echo $! >> /tmp/.scistream/outbound.pid; "
         f"sleep 1; "
-        f'while ! grep -q "Listeners" /tmp/.scistream/conout-{idx}.log; do sleep 1; done; '
+        #f'while ! grep -q "Listeners" /tmp/.scistream/conout-{idx}.log; do sleep 1; done; '
+        #f'for t in $(seq 1 {timeout}); do grep -q "Listeners" /tmp/.scistream/conout-{idx}.log && break; sleep 1; done; '
+        f'for t in $(seq 1 10); do grep -q "Listeners" /tmp/.scistream/conout-{idx}.log && break; sleep 1; done; '
         f"cat /tmp/.scistream/conout-{idx}.log ",
         localhost=cfg.localhost,
     )
@@ -244,12 +246,15 @@ def outbound(
 # -------------------------------------------------------------------------------
 # Control Service
 def start_scistream(
-    cfg: Config, encrypt: int, parallel: int, timeout: int,
+    cfg: Config, encrypt: int, splice: int, parallel: int, timeout: int,
 ) -> tuple[list[str], list[int], list[int], list[int], list[int]]:
     if encrypt:
         _replace_haproxy_cfg(cfg, 'haproxy.cfg.j2_encr')
     else:
-        _replace_haproxy_cfg(cfg, 'haproxy.cfg.j2_no_encr')
+        if splice:
+            _replace_haproxy_cfg(cfg, 'haproxy.cfg.j2_splice')
+        else:
+            _replace_haproxy_cfg(cfg, 'haproxy.cfg.j2_no_splice')
 
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     keys_exist = _check_keys_exist(cfg, hosts)
@@ -269,8 +274,8 @@ def start_scistream(
         port_range = f'{port_range_start}-{port_range_end}' #(parallel) }'
         start_s2cs(cfg, host=cfg.hosts.ap.get("listener"), listener_ip=cfg.listener_ip, sync_port=cfg.scisync_port, port_range=port_range, timeout=timeout)
         # start_s2cs(cfg, host=cfg.hosts.ap.get("initiator"), listener_ip=cfg.initiator_ap_ip, sync_port=cfg.scisync_port, port_range=port_range, timeout=timeout)
-        #time.sleep(cfg.sleep)
         time.sleep(1)
+
         # listen_ep_ports = [cfg.inbound_ports[0] + (i) for i in range(parallel)]
         #listen_ep_ports = [cfg.inbound_ports[0] + i]
         listen_ep_port = [inbound_start_range]
@@ -283,12 +288,12 @@ def start_scistream(
             remote_ip=cfg.listener_ap_ip,
             s2cs_ip=cfg.listener_ap_pub,
             sync_port=cfg.scisync_port,
-            parallel=parallel, timeout=timeout,
+            parallel=parallel, timeout=5,
+            # timeout=timeout,
             idx = i,
             )
 
         start_s2cs(cfg, host=cfg.hosts.ap.get("initiator"), listener_ip=cfg.initiator_ap_ip, sync_port=cfg.scisync_port, port_range=port_range, timeout=timeout)
-        #time.sleep(cfg.sleep)
         time.sleep(1)
 
         initiate_ep_port =[outbound_start_range]
@@ -302,20 +307,26 @@ def start_scistream(
             receiver_ports=initiate_ep_port, 
             s2cs_ip=cfg.initiator_ap_pub,
             sync_port=cfg.scisync_port,
-            parallel=parallel, timeout=timeout,
+            parallel=parallel, timeout=5,
+            # timeout=timeout,
             idx = i,
         )
-        time.sleep(cfg.sleep)
+
+        #time.sleep(cfg.sleep)
+        time.sleep(1)
+        _check_proxy_config(cfg, stream_uid)
+    
         port_range_start += 5
         port_range_end += 5
         inbound_start_range += 5
         outbound_start_range += 5
-        _check_proxy_config(cfg, stream_uid)
+
         stream_ids.append(stream_uid)
         listen_ap_ports.extend(listen_ap_port)
         initiate_ap_ports.extend(initiate_ap_port)
         listen_ep_ports.extend(listen_ep_port)
         initiate_ep_ports.extend(initiate_ep_port)
+
         logging.debug(
             "SCI: Started the tunnel: \nStream UID: %s, Listen AP Port: %s, Initiate AP Port: %s, Listen EP Port: %s, Initiate EP Port: %s", 
             stream_uid, listen_ap_port, initiate_ap_port, listen_ep_port, initiate_ep_port
@@ -339,9 +350,9 @@ def stop_scistream(
             # f"[[ -z \"$HAPROXY_CONFIG_PATH\" ]] && "
             # f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
             # f"sleep 1; "
-            # f"sudo pkill haproxy && sleep 1 && echo \"$(ps -ef | grep haproxy)\" >> \"$HAPROXY_CONFIG_PATH\"/kill.log; "
-            # f"sudo pkill stunnel && sleep 1 && echo \"$(ps -ef | grep '[s]tunnel')\" >> \"$HAPROXY_CONFIG_PATH\"/kill.log; "
-            # f"sudo pkill nginx && sleep 1 && echo \"$(ps -ef | grep '[n]ginx')\" >> \"$HAPROXY_CONFIG_PATH\"/kill.log; ",
+            # f"sudo pkill haproxy && sleep 1 && echo \"$(ps -ef | grep haproxy)\" >> /tmp/.scistream/kill.log; "
+            # f"sudo pkill stunnel && sleep 1 && echo \"$(ps -ef | grep '[s]tunnel')\" >> /tmp/.scistream/kill.log; "
+            # f"sudo pkill nginx && sleep 1 && echo \"$(ps -ef | grep '[n]ginx')\" >> /tmp/.scistream/kill.log; ",
             # f"sudo pkill haproxy && sleep 1; "
             # f"sudo pkill stunnel && sleep 1; "
             # f"sudo pkill nginx && sleep 1; ",
@@ -363,8 +374,8 @@ def stop_scistream(
             host, None,
             #f"[[ -z \"$HAPROXY_CONFIG_PATH\" ]] && "
             # f"HAPROXY_CONFIG_PATH=/tmp/.scistream && mkdir -p \"$HAPROXY_CONFIG_PATH\"; "
-            # f"[[ -f \"$HAPROXY_CONFIG_PATH\"/inbound.pid ]] && pid=\"$(cat \"$HAPROXY_CONFIG_PATH\"/inbound.pid)\" && [[ $pid =~ ^[0-9]+$ ]] && kill -9 \"$pid\" > \"$HAPROXY_CONFIG_PATH\"/kill.log 2>&1; "
-            # f"[[ -f \"$HAPROXY_CONFIG_PATH\"/outbound.pid ]] && pid=\"$(cat \"$HAPROXY_CONFIG_PATH\"/outbound.pid)\" && [[ $pid =~ ^[0-9]+$ ]] && kill -9 \"$pid\" >> \"$HAPROXY_CONFIG_PATH\"/kill.log 2>&1; ",
+            # f"[[ -f /tmp/.scistream/inbound.pid ]] && pid=\"$(cat /tmp/.scistream/inbound.pid)\" && [[ $pid =~ ^[0-9]+$ ]] && kill -9 \"$pid\" > /tmp/.scistream/kill.log 2>&1; "
+            # f"[[ -f /tmp/.scistream/outbound.pid ]] && pid=\"$(cat /tmp/.scistream/outbound.pid)\" && [[ $pid =~ ^[0-9]+$ ]] && kill -9 \"$pid\" >> /tmp/.scistream/kill.log 2>&1; ",
             # f"find \"$HAPROXY_CONFIG_PATH\" ! -name kill.log -delete ",
             f"pkill -TERM -f '[s]2uc' || true ",
             localhost=cfg.localhost,

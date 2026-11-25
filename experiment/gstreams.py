@@ -75,7 +75,29 @@ def _parse_contact_port(output: str) -> tuple[int, str, int]:
     return int(m.group("port")), mm.group("host"), int(mm.group("port"))
 
 
-def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
+# def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
+#     out: dict[Role, str] = {}
+#     for role, host in cfg.hosts.ap.items():
+#         cp = run_subprocess(host, None, "gcs stream-gateway list \n", localhost=cfg.localhost)
+#         if check and cp.returncode != 0:
+#             raise RuntimeError(
+#                 f"GST: Failed getting the stream id on {host.upper()}\n"
+#                 f"STDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}"
+#             )
+#         out[role] = _parse_gateway_id(cp.stdout + "\n" + cp.stderr, [cfg.lease.capitalize(), ], exact=False)
+#         logging.debug("GST: Stream Gateway id on %s %s", host.upper(), cp.stdout.strip())
+#     missing = {"initiator", "listener"} - set(out.keys())
+#     if missing:
+#         raise RuntimeError(f"GST: Missing stream ids for roles: {sorted(missing)}")
+#     return out
+
+_STREAM_ID_CACHE: dict[str, Dict[Role, str]] = {}
+def get_stream_id(cfg: Config, check: bool = True, refresh: bool = False) -> Dict[Role, str]:
+    key = cfg.lease.lower()
+    cached = _STREAM_ID_CACHE.get(key)
+    if not refresh and cached and all(cached.get(r) for r in ("initiator", "listener")):
+        logging.debug("GST: Using cached stream ids %s", cached)
+        return dict(cached)
     out: dict[Role, str] = {}
     for role, host in cfg.hosts.ap.items():
         cp = run_subprocess(host, None, "gcs stream-gateway list \n", localhost=cfg.localhost)
@@ -87,9 +109,10 @@ def get_stream_id(cfg: Config, check: bool = True) -> Dict[Role, str]:
         #out[role] = _parse_gateway_id(cp.stdout + "\n" + cp.stderr, [cfg.lease.capitalize(), role.capitalize()], exact=False)
         out[role] = _parse_gateway_id(cp.stdout + "\n" + cp.stderr, [cfg.lease.capitalize(), ], exact=False)
         logging.debug("GST: Stream Gateway id on %s %s", host.upper(), cp.stdout.strip())
-    missing = {"initiator", "listener"} - set(out.keys())
+    missing = {r for r in ("initiator", "listener") if not out.get(r)}
     if missing:
         raise RuntimeError(f"GST: Missing stream ids for roles: {sorted(missing)}")
+    _STREAM_ID_CACHE[key] = dict(out)
     return out
 
 
@@ -107,18 +130,25 @@ def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, che
     splice_buffer_size = blk * (1024 ** 2)
     for host in cfg.hosts.ap.values():
         if encr == 1:
+            epoll_line = "#$GLOBUS_XIO_USE_EPOLL 1"     #   $GLOBUS_XIO_USE_EPOLL 1
             splice_line = "#$AWAI_SPLICE_ROUTING 0"
             encrypt_line = "$AWAI_WAN_ENCRYPTION 1"
             buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+
         elif awai == 1:
+            epoll_line = "#$GLOBUS_XIO_USE_EPOLL 1"     #   #$GLOBUS_XIO_USE_EPOLL 1
             splice_line = "$AWAI_SPLICE_ROUTING 1"
             encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
-            buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
-        else:
+            buffer_line = f"$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+
+        else:   
+            epoll_line = "#$GLOBUS_XIO_USE_EPOLL 1"     #   "$GLOBUS_XIO_USE_EPOLL 1"
             splice_line = "#$AWAI_SPLICE_ROUTING 0"
             encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
             buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
+
         extra = (
+            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_XIO_USE_EPOLL[[:space:]]+.*$|{epoll_line}|' "
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|{splice_line}|' "
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|{encrypt_line}|' "
             # f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|{buffer_line}|' "
@@ -219,7 +249,7 @@ def check_gridftp_config(
         logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
         gridftp_config(cfg, block, splice, encrypt, output_dir)
         last_block, last_splice, last_encrypt= block, splice, encrypt
-        hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+        hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values()) if "gtr" in cfg.app else list(cfg.hosts.ap.values()) 
         restart_gridftp(cfg, hosts)
         time.sleep(cfg.sleep)
     logging.info("GTR: Recording the Gridftp configuration")
@@ -229,7 +259,7 @@ def check_gridftp_config(
 
 #-------------------------------------------------------------------------------
 # Globus Streams Tunnel setup
-def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 100, wait: int = 5) -> tuple[str, str]:
+def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 50, wait: int = 5) -> tuple[str, str]:
     for ret in range(1, retry + 1):
         cp = run_subprocess(
             cfg.localhost, None, #cfg.local_env,

@@ -2161,11 +2161,12 @@ def _software_report(
         f"echo; echo '### iproute2'; ip -Version || true; "
         f"echo; echo '### docker'; docker --version || true; "
         f"echo; echo '### globus'; globus --version || true; "
+        f"echo; echo '### globus'; gcs --version || true; "
         f") > {shlex.quote(out_dir)}/software.log 2>&1"
     )
 
     for host in hosts:
-        cp = run_subprocess(host, None, cmd, localhost=cfg.localhost)
+        cp = run_subprocess(host, cfg.remote_env, cmd, localhost=cfg.localhost)
         if check and cp.returncode != 0:
             raise RuntimeError(f"SOFTWARE: Failed on {host.upper()}\nSTDOUT:\n{cp.stdout}\nSTDERR:\n{cp.stderr}")
 

@@ -26,7 +26,7 @@ from zmqstream import (
 # ------------------------------------------------------------------------------
 # Globus Streams tunnel
 def run_zmq_gst(cfg: Config, opts: ZmqOpts, *, app_tag: str, out_dir: str, label: str,
-                parallel: int, sample_size: int, encrypt: int) -> None:
+                parallel: int, sample_size: int, encrypt: int, splice: int) -> None:
     start_port = opts.gst_encrypt_port if encrypt else opts.gst_port
     listener, initiator = cfg.hosts.ep["listener"], cfg.hosts.ep["initiator"]
     tunnels: list[str] = []
@@ -52,7 +52,7 @@ def run_zmq_gst(cfg: Config, opts: ZmqOpts, *, app_tag: str, out_dir: str, label
 # ------------------------------------------------------------------------------
 # Direct (No-SciStream baseline)
 def run_zmq_base(cfg: Config, opts: ZmqOpts, *, app_tag: str, out_dir: str, label: str,
-                 parallel: int, sample_size: int, encrypt: int) -> None:
+                 parallel: int, sample_size: int, encrypt: int, splice: int) -> None:
     listener, initiator = cfg.hosts.ep["listener"], cfg.hosts.ep["initiator"]
     ports = [opts.direct_port + (i * 2) for i in range(parallel)]
     producers = [ProducerSpec(listener, p) for p in ports]
@@ -66,12 +66,12 @@ def run_zmq_base(cfg: Config, opts: ZmqOpts, *, app_tag: str, out_dir: str, labe
 # ------------------------------------------------------------------------------
 # SciStream
 def run_zmq_sci(cfg: Config, opts: ZmqOpts, *, app_tag: str, out_dir: str, label: str,
-                parallel: int, sample_size: int, encrypt: int) -> None:
+                parallel: int, sample_size: int, encrypt: int, splice: int, ) -> None:
     listener, initiator = cfg.hosts.ep["listener"], cfg.hosts.ep["initiator"]
     try:
         logging.info("ZSCI: Creating %d SciStream tunnels (encrypt=%d)", parallel, encrypt)
         stream_ids, _, initiate_ap_ports, listen_ep_ports, _ = start_scistream(
-            cfg, encrypt, parallel, opts.stream_timeout)
+            cfg, encrypt, splice,  parallel, opts.stream_timeout)
         if not (len(stream_ids) == len(initiate_ap_ports) == len(listen_ep_ports) == parallel):
             raise RuntimeError(
                 f"ZSCI: expected {parallel} tunnels, got ids={stream_ids} "
@@ -88,8 +88,8 @@ def run_zmq_sci(cfg: Config, opts: ZmqOpts, *, app_tag: str, out_dir: str, label
 
 RUNNERS: dict[str, Callable[..., None]] = {
     "zgst": run_zmq_gst,
-    "zbase": run_zmq_base,
     "zsci": run_zmq_sci,
+    "zbase": run_zmq_base,
 }
 
 
@@ -115,22 +115,31 @@ def run_with_retries(cfg: Config, opts: ZmqOpts, app: str, *, out_dir: str, **kw
 # Main loop
 def experiment_main(cfg: Config, opts: ZmqOpts) -> None:
     net_modes = build_net_modes(cfg.splice, cfg.encrypt)
+    runs = cfg.run_num
+    start_run = cfg.start_run
     combos = [
         (block, parallel, size, splice, encrypt, run)
         for block in cfg.blocks
         for parallel in cfg.parallels
         for size in opts.sizes
+        # for splice, encrypt in net_modes
+        # for run in range(1, cfg.run_num + 1)
+        
+        #for run in range(1, cfg.run_num + 1)
+        for run in range(start_run, runs + 1)
         for splice, encrypt in net_modes
-        for run in range(1, cfg.run_num + 1)
     ]
     total = len(combos)
-    base_dir = Path(cfg.report_dir) / cfg.test / "zmq"
+    #base_dir = Path(cfg.report_dir) / cfg.test / "zmq"
+    base_dir = Path(cfg.report_dir) / f"zmq-{opts.pattern}"
     logging.info("MAIN: %d configurations x %d app(s) = %d stream tests | apps=%s pattern=%s "
                  "total=%d GiB%s", total, len(cfg.app), total * len(cfg.app), list(cfg.app),
                  opts.pattern, opts.total_size_gb, " per stream" if opts.per_stream else " per run")
 
-    if not cfg.is_test:
+    #if not cfg.is_test:
+    if not cfg.is_test and cfg.start_run == 1:
         sys_dir = str(base_dir / "sys-info")
+        #sys_dir = str(Path(cfg.report_dir) / "sys-info")
         logging.info("SYS: Recording the system reports in %s", sys_dir)
         system_state_report(cfg, sys_dir)
 
@@ -144,14 +153,37 @@ def experiment_main(cfg: Config, opts: ZmqOpts) -> None:
         logging.info("")
         logging.info("--------------- Stream %s ---------------", context)
 
+        # cur_conf = (block, splice, encrypt)
+        # if "zgst" in cfg.app and cur_conf != (last_block, last_splice, last_encrypt):
+        #         last_block, last_splice, last_encrypt = check_gridftp_config(
+        #             cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, out_dir
+        #         )
+        # time.sleep(cfg.sleep * 2)
+
         try:
+            cur_conf = (block, splice, encrypt)
+            if "zgst" in cfg.app and cur_conf != (last_block, last_splice, last_encrypt):
+                last_block, last_splice, last_encrypt = check_gridftp_config(
+                    cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, out_dir
+                )
+                time.sleep(cfg.sleep * 2)
+
             create_output_dir(cfg, out_dir, timeout=120)
+            # cur_conf = (block, splice, encrypt)
+            # if "zgst" in cfg.app and cur_conf != (last_block, last_splice, last_encrypt):
+            #     last_block, last_splice, last_encrypt = check_gridftp_config(
+            #         cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, out_dir
+            #     )
+            #     time.sleep(cfg.sleep * 2)
+
             for app in cfg.app:
-                if app == "zgst":
-                    last_block, last_splice, last_encrypt = check_gridftp_config(
-                        cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, out_dir)
+                #if app == "zgst":
+                # if block != last_block or splice != last_splice or encrypt != last_encrypt:
+                #     last_block, last_splice, last_encrypt = check_gridftp_config(
+                #         cfg, block, splice, encrypt, last_block, last_splice, last_encrypt, out_dir)
+                #     time.sleep(cfg.sleep)
                 run_with_retries(cfg, opts, app, out_dir=out_dir, label=label,
-                                 parallel=parallel, sample_size=size, encrypt=encrypt)
+                                 parallel=parallel, sample_size=size, encrypt=encrypt, splice=splice)
                 time.sleep(cfg.sleep)
         except Exception as exc:
             logging.exception("EXPERIMENT: failed at %s", context)

@@ -255,6 +255,7 @@ class Config:
     file_sizes: Sequence[int]
     blocks: Sequence[int]
     run_num: int
+    start_run: int
 
     local_env: str
     remote_env: str
@@ -319,6 +320,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--size", "-n", type=_parse_int_list, default=[1])
     parser.add_argument("--blocks", "-b", type=_parse_int_list, default=[32])
     parser.add_argument("--run", "-r", type=int, default=1)
+    parser.add_argument("--start-run", "-sr", type=int, default=1, help="Run number to start from (inclusive), resume at R5 when --run is 10")
 
     parser.add_argument("--output", "-o", default="/tmp/")
 
@@ -413,6 +415,8 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
         file_sizes=args.size if not is_stream else [],
         blocks=args.blocks,
         run_num=args.run,
+        start_run=args.start_run,
+
         local_env="$HOME/Projects/gstreams",
         remote_env="$HOME/streams-cli/bin/activate",
         scistream_env="$HOME/scistream-proto/.seenvstream/bin/activate",
@@ -428,8 +432,18 @@ def build_config(args: argparse.Namespace,  test_mode: TestMode) -> Config:
 #         for test_mode in args.test
 #     ]
 
+# def get_configs() -> list[Config]:
+#     parser, args = parse_args()
+#     if not args.splice and not args.encrypt:
+#         parser.error("at least one of --splice or --encrypt is required")
+#     return [build_config(args, test_mode) for test_mode in args.test]
 def get_configs() -> list[Config]:
     parser, args = parse_args()
     if not args.splice and not args.encrypt:
-        parser.error("at least one of --splice or --encrypt is required")
+        args.splice = [0]
+        # parser.error("at least one of --splice or --encrypt is required")
+    if args.start_run < 1:
+        parser.error("--start-run must be >= 1")
+    if args.start_run > args.run:
+        parser.error(f"--start-run ({args.start_run}) cannot be greater than --run ({args.run})")
     return [build_config(args, test_mode) for test_mode in args.test]

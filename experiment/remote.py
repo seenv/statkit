@@ -59,7 +59,7 @@ def _build_argv(host: str, env: Optional[str], cmd: str, localhost: str) -> list
 
 def run_subprocess(host: str, env: Optional[str], cmd: str, *, 
                    localhost: str, check: bool = True, timeout: Optional[int] = None,
-                    retries: int = 100, sleep: int = 5) -> subprocess.CompletedProcess[str]:
+                    retries: int = 10, sleep: int = 5) -> subprocess.CompletedProcess[str]:
 
     argv = _build_argv(host, env, cmd, localhost=localhost)
     total_attempts = retries + 1
