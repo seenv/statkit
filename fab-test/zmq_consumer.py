@@ -12,6 +12,11 @@ Outputs in --out:
 Goodput  = received * sample_size / (t_stop - t_first)
 Delay    = mean(diff(ts)),  Jitter = std(diff(ts))   (computed later, offline)
 
+Synchronized start (--ready-file): once the HEADER has arrived, i.e. the whole
+path (tunnel / proxy / connection) works, the consumer creates the ready file.
+The orchestrator starts all producers together only when every consumer of the
+run is ready, so the consumer may wait up to --first-data-timeout for data.
+
 Exit codes: 0 ok, 2 error/timeout, 3 count mismatch (PUSH/PULL only;
 PUB/SUB drops are recorded in the JSON and exit 0).
 """
@@ -41,6 +46,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--hwm", type=int, default=1000)
     p.add_argument("--start-timeout", type=int, default=300, help="Seconds to wait for HEADER")
     p.add_argument("--idle-timeout", type=int, default=120, help="Max seconds between messages")
+    p.add_argument("--ready-file", default=None, help="create this file once the HEADER has arrived")
+    p.add_argument("--first-data-timeout", type=int, default=180,
+                   help="max seconds between the HEADER and the first data message")
     p.add_argument("--out", required=True)
     p.add_argument("--tag", required=True)
     return p.parse_args()
@@ -90,10 +98,16 @@ def main() -> int:
         ss, n = int(header["sample_size"]), int(header["num_samples"])
         if ss != a.sample_size:
             raise RuntimeError(f"sample size mismatch: header={ss} expected={a.sample_size}")
-        info.update({"sample_size": ss, "num_samples": n})
+        info.update({"sample_size": ss, "num_samples": n, "t_header_ns": time.perf_counter_ns()})
 
         ts = np.empty(n, dtype=np.int64)
-        sock.setsockopt(zmq.RCVTIMEO, a.idle_timeout * 1000)
+        if a.ready_file:
+            os.makedirs(os.path.dirname(a.ready_file) or ".", exist_ok=True)
+            with open(a.ready_file, "w", encoding="utf-8") as f:
+                f.write(str(time.time_ns()))
+            print(f"CONSUMER {a.tag}: HEADER received, ready", flush=True)
+        # the first data message comes only after every stream of the run is ready
+        sock.setsockopt(zmq.RCVTIMEO, max(a.idle_timeout, a.first_data_timeout) * 1000)
         copy = ss < ZERO_COPY_MIN
         recv = sock.recv
         clock = time.perf_counter_ns
@@ -108,6 +122,8 @@ def main() -> int:
                     if received < n:
                         ts[received] = t
                         received += 1
+                        if received == 1:
+                            sock.setsockopt(zmq.RCVTIMEO, a.idle_timeout * 1000)
                     else:
                         extra += 1
                     continue
@@ -117,8 +133,8 @@ def main() -> int:
                     break
                 raise RuntimeError(f"unexpected message of {len(m)} bytes")
         except zmq.Again:
-            raise TimeoutError(
-                f"no message for {a.idle_timeout}s after {received} samples") from None
+            waited = a.idle_timeout if received else max(a.idle_timeout, a.first_data_timeout)
+            raise TimeoutError(f"no message for {waited}s after {received} samples") from None
 
         sent = int(stop["sent"])
         info.update({
