@@ -49,10 +49,19 @@ def setup_logging(verbose: bool, log_path: str = "/tmp/statkit.log") -> None:
     root.addHandler(fh)
 
 
-def notify(topic: str, title: str, message: str) -> None:
-    subprocess.run(["curl", "-H", f"Title: {title}", "-d", message, f"https://ntfy.sh/{topic}"], check=False)
+# def notify(topic: str, title: str, message: str) -> None:
+#     subprocess.run(["curl", "-H", f"Title: {title}", "-d", message, f"https://ntfy.sh/{topic}"], check=False)
+def notify(topic: str, title: str, message: str, file: str | None = None) -> None:
+    cmd = ["curl", "-H", f"Title: {title}"]
+    if file:
+        cmd += ["-T", file, "-H", f"Filename: {os.path.basename(file)}",
+                "-H", f"Message: {message.replace(chr(10), '\\n')}"]
+    else:
+        cmd += ["-d", message]
+    subprocess.run(cmd + [f"https://ntfy.sh/{topic}"], check=False)
 
-def send_ntfy(success: bool, cfg: Config, msg: Exception | None = None) -> None:
+# def send_ntfy(success: bool, cfg: Config, msg: Exception | None = None) -> None:
+def send_ntfy(success: bool, cfg: Config, msg: Exception | None = None, file: str | None = None) -> None:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if success:
         title = f"Experiment '{cfg.tname.capitalize()}' Finished"
@@ -61,7 +70,8 @@ def send_ntfy(success: bool, cfg: Config, msg: Exception | None = None) -> None:
         title = f"Experiment '{cfg.tname.capitalize()}' Failed"
         message = (f"\n Lease: {cfg.lease.capitalize()} \n Time: {now} \n \nMessage: {msg}\n")
     #notify(topic=f"{cfg.test.replace(' ', '-')}", title=title, message=message)
-    notify(topic='seenv-streamzmq-tests', title=title, message=message)
+    #notify(topic=f"{cfg.test.replace(' ', '-')}", title=title, message=message, file=file)
+    notify(topic='seenv-streamhub-tests', title=title, message=message, file=file)
 
 
 #-------------------------------------------------------------------------------
@@ -132,15 +142,28 @@ def make_file(cfg: Config, parallel: int, arg: int, files: list[str], file_path:
     logging.debug("FILE: Created the source file(s) on %s: %s", host.upper(), cp.stdout.strip())
 
 
+APP_FILE_PREFIX = {
+    "iperf": "iperf_gst", "ibase": "iperf_base", "sperf": "iperf_sci",
+    "mini":  "mini_gst", "mbase": "mini_base", "msci":  "mini_sci",
+    "rsync": "rsync_gst", "rbase": "rsync_base", "rsci": "rsync_sci",
+    "gtr": "globus_gtr",
+}
 def create_output_dir(cfg: Config, output_dir: str, timeout: int):
+    """
+    Remaining files:
+        gridftp-stream.log in .gstream
+    """
+    out = shlex.quote(output_dir)
+    patterns = [
+        f"{out}/*{shlex.quote(APP_FILE_PREFIX[app])}*"
+        for app in cfg.app if app in APP_FILE_PREFIX
+    ]
+    rm_cmd = f"rm -f {' '.join(patterns)} && " if patterns else ""
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
         cp = run_subprocess(
             host, None,
-            f"mkdir -p {shlex.quote(output_dir)} && "
-            f"rm -f {shlex.quote(output_dir)}/* && "
-            # f"find {shlex.quote(out_dir)} -mindepth 1 -delete && "
-            f'ls {shlex.quote(output_dir)} ',
+            f"mkdir -p {out} && {rm_cmd}  ls {out} ",
             localhost=cfg.localhost,
             timeout=timeout,
         )
@@ -252,15 +275,32 @@ def copy_results(cfg, check: bool = True) -> None:
 
 #-------------------------------------------------------------------------------
 # Statkit monitor
+# def start_statkit(cfg: Config, timeout : int , app: str, out_dir: str, check: bool = True) -> None:
+#     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+#     for host in hosts:
+#         pattern = "[g]lobus-gridftp-server|[h]aproxy|[i]perf3|[r]sync|[d]ocker"
+#         cp = popen_subprocess(
+#             host, cfg.remote_env,
+#             f"mkdir -p {shlex.quote(out_dir)} && "
+#             f"pids=$(pgrep -d, -f {shlex.quote(pattern)} || true); "
+#             f"python ~/statkit/monitor/launcher.py --pids \"$pids\" "
+#             f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} "
+#             f"--duration {timeout} & "
+#             f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ",
+#             localhost=cfg.localhost,
+#         )
+#         logging.debug("SYS: Started on statkit on %s %s", host.upper(), cp.stdout)
 def start_statkit(cfg: Config, timeout : int , app: str, out_dir: str, check: bool = True) -> None:
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
         pattern = "[g]lobus-gridftp-server|[h]aproxy|[i]perf3|[r]sync|[d]ocker"
+        names = "globus-gridftp-server,haproxy,iperf3,rsync,docker"
         cp = popen_subprocess(
             host, cfg.remote_env,
             f"mkdir -p {shlex.quote(out_dir)} && "
             f"pids=$(pgrep -d, -f {shlex.quote(pattern)} || true); "
             f"python ~/statkit/monitor/launcher.py --pids \"$pids\" "
+            f"--process-names {shlex.quote(names)} "
             f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} "
             f"--duration {timeout} & "
             f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ",

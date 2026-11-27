@@ -15,7 +15,7 @@ from config import Config
 from remote import run_subprocess, popen_subprocess
 from gstreams import (
     get_stream_id, start_tunnel, status_tunnel, stop_tunnel, delete_tunnel,
-    init_listener_env, init_initiator_env,
+    init_listener_env, init_initiator_env, start_globus_streams, stop_globus_streams
 )
 from zmq_config import ZmqOpts
 
@@ -121,20 +121,37 @@ def delete_app_files(cfg: Config, out_dir: str, app_tag: str) -> None:
 # Statkit (no --duration; started/stopped explicitly around each stream)
 _STATKIT_PATTERN = "[g]lobus-gridftp-server|[h]aproxy|[i]perf3|[r]sync|[d]ocker"
 
+# def start_statkit_zmq(cfg: Config, app: str, out_dir: str) -> None:
+#     q, a = shlex.quote(out_dir), shlex.quote(app)
+#     for host in _all_hosts(cfg):
+
+#         run_subprocess(
+#             host, cfg.remote_env,
+#             f"mkdir -p {q} && "
+#             f"pids=$(pgrep -d, -f {shlex.quote(_STATKIT_PATTERN)} || true); "
+#             f"nohup python ~/statkit/monitor/launcher.py --pids \"$pids\" "
+#             f"--out {q} --app {a} > {q}/{a}-launcher.out 2>&1 < /dev/null & "
+#             f"echo $! > {q}/{a}-launcher.pid",
+#             localhost=cfg.localhost,
+#         )
+#     logging.info("ZMQ: Started statkit (%s) on all hosts", app)
+
 def start_statkit_zmq(cfg: Config, app: str, out_dir: str) -> None:
     q, a = shlex.quote(out_dir), shlex.quote(app)
     for host in _all_hosts(cfg):
-
-        run_subprocess(
+        pattern = "[g]lobus-gridftp-server|[h]aproxy|[i]perf3|[r]sync|[d]ocker"
+        names = "globus-gridftp-server,haproxy,iperf3,rsync,docker"
+        cp = popen_subprocess(
             host, cfg.remote_env,
             f"mkdir -p {q} && "
-            f"pids=$(pgrep -d, -f {shlex.quote(_STATKIT_PATTERN)} || true); "
-            f"nohup python ~/statkit/monitor/launcher.py --pids \"$pids\" "
+            f"pids=$(pgrep -d, -f {shlex.quote(pattern)} || true); "
+            f"python ~/statkit/monitor/launcher.py --pids \"$pids\" "
+            f"--process-names {shlex.quote(names)} "
             f"--out {q} --app {a} > {q}/{a}-launcher.out 2>&1 < /dev/null & "
             f"echo $! > {q}/{a}-launcher.pid",
             localhost=cfg.localhost,
         )
-    logging.info("ZMQ: Started statkit (%s) on all hosts", app)
+        logging.info("ZMQ: Started statkit (%s) on all hosts", app)
 
 
 def check_statkit_alive(cfg: Config, app: str, out_dir: str) -> None:
@@ -186,11 +203,12 @@ def teardown_gst(cfg: Config, tunnels: list[str]) -> None:
     if not tunnels:
         return
     logging.info("ZGST: Stopping %d tunnel(s)", len(tunnels))
-    for t in tunnels:
-        stop_tunnel(cfg, t)
-    for t in tunnels:
-        status_tunnel(cfg, t, "STOPPED")
-        delete_tunnel(cfg, t)
+    # for t in tunnels:
+    #     stop_tunnel(cfg, t)
+    # for t in tunnels:
+    #     status_tunnel(cfg, t, "STOPPED")
+    #     delete_tunnel(cfg, t)
+    stop_globus_streams(cfg, tunnels)
 
 
 # ------------------------------------------------------------------------------

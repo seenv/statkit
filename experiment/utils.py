@@ -275,15 +275,32 @@ def copy_results(cfg, check: bool = True) -> None:
 
 #-------------------------------------------------------------------------------
 # Statkit monitor
+# def start_statkit(cfg: Config, timeout : int , app: str, out_dir: str, check: bool = True) -> None:
+#     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
+#     for host in hosts:
+#         pattern = "[g]lobus-gridftp-server|[h]aproxy|[i]perf3|[r]sync|[d]ocker"
+#         cp = popen_subprocess(
+#             host, cfg.remote_env,
+#             f"mkdir -p {shlex.quote(out_dir)} && "
+#             f"pids=$(pgrep -d, -f {shlex.quote(pattern)} || true); "
+#             f"python ~/statkit/monitor/launcher.py --pids \"$pids\" "
+#             f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} "
+#             f"--duration {timeout} & "
+#             f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ",
+#             localhost=cfg.localhost,
+#         )
+#         logging.debug("SYS: Started on statkit on %s %s", host.upper(), cp.stdout)
 def start_statkit(cfg: Config, timeout : int , app: str, out_dir: str, check: bool = True) -> None:
     hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values())
     for host in hosts:
         pattern = "[g]lobus-gridftp-server|[h]aproxy|[i]perf3|[r]sync|[d]ocker"
+        names = "globus-gridftp-server,haproxy,iperf3,rsync,docker"
         cp = popen_subprocess(
             host, cfg.remote_env,
             f"mkdir -p {shlex.quote(out_dir)} && "
             f"pids=$(pgrep -d, -f {shlex.quote(pattern)} || true); "
             f"python ~/statkit/monitor/launcher.py --pids \"$pids\" "
+            f"--process-names {shlex.quote(names)} "
             f"--out {shlex.quote(out_dir)} --app {shlex.quote(app)} "
             f"--duration {timeout} & "
             f"echo $! > {shlex.quote(out_dir)}/{shlex.quote(app)}-launcher.pid ",

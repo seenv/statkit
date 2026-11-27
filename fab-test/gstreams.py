@@ -14,6 +14,8 @@ from datetime import datetime
 import socket
 import traceback
 
+from concurrent.futures import ThreadPoolExecutor
+
 from config import Config, Role
 from remote import run_subprocess, popen_subprocess
 
@@ -130,32 +132,31 @@ def gridftp_config(cfg: Config, blk: int, awai:int, encr: int, out_dir: str, che
     splice_buffer_size = blk * (1024 ** 2)
     for host in cfg.hosts.ap.values():
         if encr == 1:
-            epoll_line = "#$GLOBUS_XIO_USE_EPOLL 1"     # Dev:  $GLOBUS_XIO_USE_EPOLL 1
+            epoll_line = "#$GLOBUS_XIO_USE_EPOLL 1"     #   $GLOBUS_XIO_USE_EPOLL 1
             splice_line = "#$AWAI_SPLICE_ROUTING 0"
             encrypt_line = "$AWAI_WAN_ENCRYPTION 1"
             buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
 
         elif awai == 1:
-            epoll_line = "#$GLOBUS_XIO_USE_EPOLL 1"     # Dev:  #$GLOBUS_XIO_USE_EPOLL 1
+            epoll_line = "#$GLOBUS_XIO_USE_EPOLL 1"     #   #$GLOBUS_XIO_USE_EPOLL 1
             splice_line = "$AWAI_SPLICE_ROUTING 1"
             encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
             buffer_line = f"$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
 
         else:   
-            epoll_line = "#$GLOBUS_XIO_USE_EPOLL 1"     # Dev:  "$GLOBUS_XIO_USE_EPOLL 1"
+            epoll_line = "#$GLOBUS_XIO_USE_EPOLL 1"     #   "$GLOBUS_XIO_USE_EPOLL 1"
             splice_line = "#$AWAI_SPLICE_ROUTING 0"
             encrypt_line = "#$AWAI_WAN_ENCRYPTION 0"
             buffer_line = f"#$AWAI_SPLICE_ROUTING_BUFFER_SIZE {splice_buffer_size}"
 
         extra = (
-            f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_XIO_USE_EPOLL[[:space:]]+.*$|{epoll_line}|' "
+            #f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_XIO_USE_EPOLL[[:space:]]+.*$|{epoll_line}|' "
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING[[:space:]]+.*$|{splice_line}|' "
             f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_WAN_ENCRYPTION[[:space:]]+.*$|{encrypt_line}|' "
             # f"-e 's|^[[:space:]]*#?[[:space:]]*\\$AWAI_SPLICE_ROUTING_BUFFER_SIZE[[:space:]]+.*$|{buffer_line}|' "
             # f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_GRIDFTP_SERVER_DEBUG[[:space:]]+.*$|$GLOBUS_GRIDFTP_SERVER_DEBUG ALL,{globus_gridftp_debug_log},1,ALL|' "
             # f"-e 's|^[[:space:]]*#?[[:space:]]*\\$GLOBUS_XIO_SYSTEM_DEBUG[[:space:]]+.*$|$GLOBUS_XIO_SYSTEM_DEBUG INFO,{globus_xio_system_debug_log}|' "
         )
-
         cp = run_subprocess(
             host, None,
             f"mkdir -p {shlex.quote(out_dir)} && "
@@ -250,7 +251,7 @@ def check_gridftp_config(
         logging.info("Applying GridFTP configuration: blocksize: %sM splice: %s encrypt: %s", block, splice, encrypt)
         gridftp_config(cfg, block, splice, encrypt, output_dir)
         last_block, last_splice, last_encrypt= block, splice, encrypt
-        hosts = list(cfg.hosts.ap.values()) #+ list(cfg.hosts.ep.values()) if "gtr" in cfg.app else list(cfg.hosts.ap.values()) 
+        hosts = list(cfg.hosts.ap.values()) + list(cfg.hosts.ep.values()) if "gtr" in cfg.app else list(cfg.hosts.ap.values()) 
         restart_gridftp(cfg, hosts)
         time.sleep(cfg.sleep)
     logging.info("GTR: Recording the Gridftp configuration")
@@ -260,7 +261,7 @@ def check_gridftp_config(
 
 #-------------------------------------------------------------------------------
 # Globus Streams Tunnel setup
-def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 20, wait: int = 5) -> tuple[str, str]:
+def status_tunnel(cfg: Config, tunnel_id: str, stat: str, retry: int = 50, wait: int = 5) -> tuple[str, str]:
     for ret in range(1, retry + 1):
         cp = run_subprocess(
             cfg.localhost, None, #cfg.local_env,
@@ -357,6 +358,64 @@ def delete_tunnel(cfg: Config, tunnel_id: str) -> None:
         check=False,
     )
     logging.debug("LOCAL: Deleted the streams tunnel %s", tunnel_id)
+
+
+def _tunnel_state(cfg: Config, tunnel_id: str) -> Optional[str]:
+    """Single non-retrying state check. Returns None if the state can't be read."""
+    cp = run_subprocess(
+        cfg.localhost, None,
+        f"globus streams tunnel show {shlex.quote(tunnel_id)}",
+        localhost=cfg.localhost,
+        check=False,
+    )
+    try:
+        state, _ = _parse_status((cp.stdout + "\n" + cp.stderr).strip())
+        return state
+    except RuntimeError:
+        logging.debug("GST: Could not read state of tunnel %s:\n%s", tunnel_id, cp.stdout + cp.stderr)
+        return None
+
+
+def stop_globus_streams(
+    cfg: Config, stream_ids: Sequence[str], retry: int = 50, wait: int = 5, max_workers: int = 8, #16,
+) -> None:
+    """Stop all tunnels at once, wait for all to reach STOPPED, then delete them all."""
+    tunnels = [t for t in dict.fromkeys(stream_ids) if t]     # dedupe, keep order, drop empties
+    if not tunnels:
+        return
+
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(tunnels))) as pool:
+        # 1. Stop everything in parallel
+        logging.info("GST: Stopping %d tunnel(s)", len(tunnels))
+        list(pool.map(lambda t: stop_tunnel(cfg, t), tunnels))
+
+        # 2. Poll all pending tunnels together, one sleep per round
+        pending = list(tunnels)
+        for attempt in range(1, retry + 1):
+            states = dict(zip(pending, pool.map(lambda t: _tunnel_state(cfg, t), pending)))
+            pending = [t for t, s in states.items() if s != "STOPPED"]
+            if not pending:
+                logging.debug("GST: All %d tunnel(s) STOPPED after %d check(s)", len(tunnels), attempt)
+                break
+            logging.debug(
+                "GST: %d / %d tunnel(s) not STOPPED yet (%s). Retry %d / %d, next try in %ds",
+                len(pending), len(tunnels),
+                ", ".join(f"{t[:8]}={states[t]}" for t in pending),
+                attempt, retry, wait,
+            )
+            if attempt < retry:
+                time.sleep(wait)
+
+        # 3. Delete the ones that stopped, in parallel
+        stopped = [t for t in tunnels if t not in pending]
+        logging.info("GST: Deleting %d tunnel(s)", len(stopped))
+        list(pool.map(lambda t: delete_tunnel(cfg, t), stopped))
+
+    if pending:
+        raise RuntimeError(
+            f"GST: {len(pending)} tunnel(s) did not reach STOPPED after {retry} attempts "
+            f"(~{max(0, retry - 1) * wait}s) and were not deleted: {pending}"
+        )
 
 
 def start_globus_streams(cfg, parallel, start_port, app, idx, timeout) ->  tuple[list[str], list[int], str]:

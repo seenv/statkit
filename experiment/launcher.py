@@ -11,8 +11,9 @@ from utils import make_file, cleanup_file, start_statkit, stop_statkit
 from utils import build_net_modes, net_mode_dir, create_output_dir, record_ping
 from sysconf import system_state_report
 
-from gstreams import get_stream_id, start_tunnel, status_tunnel, stop_tunnel, delete_tunnel
-from gstreams import start_globus_streams, init_listener_env, init_initiator_env
+# from gstreams import get_stream_id, start_tunnel, status_tunnel, stop_tunnel, delete_tunnel
+from gstreams import start_globus_streams, stop_globus_streams
+from gstreams import init_listener_env, init_initiator_env
 from gstreams import check_gridftp_config, restart_gridftp, gridftp_config, gridftp_report, logging_gridftp
 
 from scistream import start_scistream, stop_scistream
@@ -81,11 +82,12 @@ def run_iperf_gst(
             logging.info("IGST: Stopping the statkit monitoring on the hosts")
             stop_statkit(cfg)
         logging.info("IGST: Stopping the tunnel(s)")
-        for tunnel in stream_ids:
-            stop_tunnel(cfg, tunnel)
-        for tunnel in stream_ids:
-            status_tunnel(cfg, tunnel, "STOPPED")
-            delete_tunnel(cfg, tunnel)
+        # for tunnel in stream_ids:
+        #     stop_tunnel(cfg, tunnel)
+        # for tunnel in stream_ids:
+        #     status_tunnel(cfg, tunnel, "STOPPED")
+        #     delete_tunnel(cfg, tunnel)
+        stop_globus_streams(cfg, stream_ids)
 
 
 # ------------------------------------------------------------------------------
@@ -243,11 +245,12 @@ def run_rsync_gst(
             stop_statkit(cfg)
         stop_rsync_daemon(cfg, listener_host, parallel, "/tmp/temp_files")
         logging.info("RGST: Stopping the tunnel(s)")
-        for tunnel in stream_ids:
-            stop_tunnel(cfg, tunnel)
-        for tunnel in stream_ids:
-            status_tunnel(cfg, tunnel, "STOPPED")
-            delete_tunnel(cfg, tunnel)
+        # for tunnel in stream_ids:
+        #     stop_tunnel(cfg, tunnel)
+        # for tunnel in stream_ids:
+        #     status_tunnel(cfg, tunnel, "STOPPED")
+        #     delete_tunnel(cfg, tunnel)
+        stop_globus_streams(cfg, stream_ids)
 
 
 # ------------------------------------------------------------------------------
@@ -448,11 +451,12 @@ def run_mini_gst(
             stop_statkit(cfg)
         stop_mini_containers(cfg, parallel, app_tag, output_dir, timeout)
         prune_containers(cfg, parallel, app_tag, output_dir, timeout)
-        for tunnel in stream_ids:
-            stop_tunnel(cfg, tunnel)
-        for tunnel in stream_ids:
-            status_tunnel(cfg, tunnel, "STOPPED")
-            delete_tunnel(cfg, tunnel)
+        # for tunnel in stream_ids:
+        #     stop_tunnel(cfg, tunnel)
+        # for tunnel in stream_ids:
+        #     status_tunnel(cfg, tunnel, "STOPPED")
+        #     delete_tunnel(cfg, tunnel)
+        stop_globus_streams(cfg, stream_ids)
 
 # ------------------------------------------------------------------------------
 # APS Mini App Base        
