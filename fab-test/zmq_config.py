@@ -59,7 +59,6 @@ class ZmqOpts:
     gst_encrypt_port: int
     direct_port: int
     local_rsync: str
-    ready_timeout: int = 120
 
     def stream_bytes(self, parallel: int) -> int:
         total = self.total_size_gb * (1024 ** 3)
@@ -132,12 +131,10 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     p.add_argument("--pattern", choices=["pubsub", "pushpull"], default="pubsub")
     p.add_argument("--hwm", type=int, default=1000, help="ZeroMQ SNDHWM/RCVHWM (messages)")
     p.add_argument("--src-dir", default="$HOME/statkit/fab-test", help="Dir with zmq_producer/consumer.py on EPs")
-    p.add_argument("--stream-timeout", type=int, default=1800, help="Max seconds per stream test")
-    p.add_argument("--start-timeout", type=int, default=300, help="Producer/consumer connect timeout")
+    p.add_argument("--stream-timeout", type=int, default=120, help="Max seconds per stream test")
+    p.add_argument("--start-timeout", type=int, default=120, help="Producer/consumer connect timeout")
     p.add_argument("--idle-timeout", type=int, default=120, help="Consumer max gap between messages")
     p.add_argument("--statkit-pad", type=int, default=2, help="Seconds of statkit before/after stream")
-    p.add_argument("--ready-timeout", type=int, default=120,
-                   help="Max seconds for ALL streams of a run to be connected before the common start")
     p.add_argument("--local-rsync", default="/opt/homebrew/bin/rsync")
 
     p.add_argument("--output", "-o", default="/tmp/")
@@ -191,7 +188,6 @@ def build_config(args: argparse.Namespace) -> tuple[Config, ZmqOpts]:
         idle_timeout=args.idle_timeout, statkit_pad=args.statkit_pad,
         gst_port=args.gst_port, gst_encrypt_port=args.gst_encrypt_port,
         direct_port=args.direct_port, local_rsync=args.local_rsync,
-        ready_timeout=args.ready_timeout,
     )
     return cfg, opts
 

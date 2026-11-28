@@ -15,7 +15,7 @@ from config import Config
 from zmq_config import ZmqOpts, APP_TAGS
 from utils import build_net_modes, net_mode_dir, create_output_dir, record_ping
 from sysconf import system_state_report
-from gstreams import check_gridftp_config, _tunnel_state
+from gstreams import check_gridftp_config
 from scistream import start_scistream, stop_scistream
 from zmqstream import (
     CountMismatchError, ProducerSpec, ConsumerSpec,
@@ -41,18 +41,8 @@ def run_zmq_gst(cfg: Config, opts: ZmqOpts, *, app_tag: str, out_dir: str, label
             ConsumerSpec(initiator, gw_ips[i], gw_ports[i], f"globus-streams-launch {t}")
             for i, t in enumerate(tunnels)
         ]
-
-        def tunnel_watch() -> dict:
-            """Tunnels whose state is readable and not ACTIVE (unreadable = no verdict)."""
-            states = {t: _tunnel_state(cfg, t) for t in tunnels}
-            unknown = [t for t, st in states.items() if st is None]
-            if unknown:
-                logging.warning("ZGST: could not read the state of %d tunnel(s): %s", len(unknown), unknown)
-            return {t: st for t, st in states.items() if st is not None and st != "ACTIVE"}
-
         run_stream(cfg, opts, app_tag=app_tag, out_dir=out_dir, sample_size=sample_size,
-                   stream_bytes=opts.stream_bytes(parallel), producers=producers, consumers=consumers,
-                   tunnel_watch=tunnel_watch)
+                   stream_bytes=opts.stream_bytes(parallel), producers=producers, consumers=consumers)
         if not cfg.is_test:
             record_ping(cfg, initiator, cfg.listener_pub, app_tag, out_dir)
     finally:

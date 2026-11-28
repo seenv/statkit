@@ -10,13 +10,12 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
 
 from config import Config
 from remote import run_subprocess, popen_subprocess
 from gstreams import (
     get_stream_id, start_tunnel, status_tunnel, stop_tunnel, delete_tunnel,
-    init_listener_env, init_initiator_env, start_globus_streams, stop_globus_streams
+    init_listener_env, init_initiator_env,
 )
 from zmq_config import ZmqOpts
 
@@ -61,21 +60,12 @@ def _wrap_remote(out_dir: str, tag: str, inner: str) -> str:
         f"}} 2>&1 "
         f"| tr '\\r' '\\n' "
         f"| stdbuf -oL awk 'NF {{ print $0; fflush(); }}' "
-        f"| tee {q}/{shlex.quote(tag)}.log; "
-        # the remote shell does not run with pipefail (ssh joins argv into one string),
-        # so return the exit code of the wrapped command, not the one of `tee`
-        f'exit "${{PIPESTATUS[0]}}"'
+        f"| tee {q}/{shlex.quote(tag)}.log"
     )
 
 
-def sync_dir(out_dir: str, app_tag: str) -> str:
-    """Folder for the start barrier files of one app (ready-<i> on the consumer host,
-    go on the producer host)."""
-    return f"{out_dir}/.sync-{app_tag}"
-
-
 def producer_cmd(opts: ZmqOpts, spec: ProducerSpec, *, tag: str, out_dir: str,
-                 sample_size: int, stream_bytes: int, go_file: str) -> str:
+                 sample_size: int, stream_bytes: int) -> str:
     q = shlex.quote(out_dir)
     inner = (
         f'cd "{opts.src_dir}" && '
@@ -84,14 +74,13 @@ def producer_cmd(opts: ZmqOpts, spec: ProducerSpec, *, tag: str, out_dir: str,
         f"--port {spec.port} --pattern {opts.pattern} "
         f"--sample-size {sample_size} --total-bytes {stream_bytes} "
         f"--hwm {opts.hwm} --start-timeout {opts.start_timeout} "
-        f"--go-file {shlex.quote(go_file)} --go-timeout {opts.ready_timeout + 60} "
         f"--out {q} --tag {shlex.quote(tag)}"
     )
     return _wrap_remote(out_dir, tag, inner)
 
 
 def consumer_cmd(opts: ZmqOpts, spec: ConsumerSpec, *, tag: str, out_dir: str,
-                 sample_size: int, ready_file: str) -> str:
+                 sample_size: int) -> str:
     q = shlex.quote(out_dir)
     inner = (
         f'cd "{opts.src_dir}" && '
@@ -100,7 +89,6 @@ def consumer_cmd(opts: ZmqOpts, spec: ConsumerSpec, *, tag: str, out_dir: str,
         f"--connect-ip {shlex.quote(spec.ip)} --port {spec.port} --pattern {opts.pattern} "
         f"--sample-size {sample_size} --hwm {opts.hwm} "
         f"--start-timeout {opts.start_timeout} --idle-timeout {opts.idle_timeout} "
-        f"--ready-file {shlex.quote(ready_file)} --first-data-timeout {opts.ready_timeout + 60} "
         f"--out {q} --tag {shlex.quote(tag)}"
     )
     return _wrap_remote(out_dir, tag, inner)
@@ -133,37 +121,23 @@ def delete_app_files(cfg: Config, out_dir: str, app_tag: str) -> None:
 # Statkit (no --duration; started/stopped explicitly around each stream)
 _STATKIT_PATTERN = "[g]lobus-gridftp-server|[h]aproxy|[i]perf3|[r]sync|[d]ocker"
 
-# def start_statkit_zmq(cfg: Config, app: str, out_dir: str) -> None:
-#     q, a = shlex.quote(out_dir), shlex.quote(app)
-#     for host in _all_hosts(cfg):
-
-#         run_subprocess(
-#             host, cfg.remote_env,
-#             f"mkdir -p {q} && "
-#             f"pids=$(pgrep -d, -f {shlex.quote(_STATKIT_PATTERN)} || true); "
-#             f"nohup python ~/statkit/monitor/launcher.py --pids \"$pids\" "
-#             f"--out {q} --app {a} > {q}/{a}-launcher.out 2>&1 < /dev/null & "
-#             f"echo $! > {q}/{a}-launcher.pid",
-#             localhost=cfg.localhost,
-#         )
-#     logging.info("ZMQ: Started statkit (%s) on all hosts", app)
-
 def start_statkit_zmq(cfg: Config, app: str, out_dir: str) -> None:
     q, a = shlex.quote(out_dir), shlex.quote(app)
     for host in _all_hosts(cfg):
         pattern = "[g]lobus-gridftp-server|[h]aproxy|[i]perf3|[r]sync|[d]ocker"
         names = "globus-gridftp-server,haproxy,iperf3,rsync,docker"
-        cp = popen_subprocess(
+
+        run_subprocess(
             host, cfg.remote_env,
             f"mkdir -p {q} && "
-            f"pids=$(pgrep -d, -f {shlex.quote(pattern)} || true); "
-            f"python ~/statkit/monitor/launcher.py --pids \"$pids\" "
+            f"pids=$(pgrep -d, -f {shlex.quote(_STATKIT_PATTERN)} || true); "
+            f"nohup python ~/statkit/monitor/launcher.py --pids \"$pids\" "
             f"--process-names {shlex.quote(names)} "
             f"--out {q} --app {a} > {q}/{a}-launcher.out 2>&1 < /dev/null & "
             f"echo $! > {q}/{a}-launcher.pid",
             localhost=cfg.localhost,
         )
-        logging.info("ZMQ: Started statkit (%s) on all hosts", app)
+    logging.info("ZMQ: Started statkit (%s) on all hosts", app)
 
 
 def check_statkit_alive(cfg: Config, app: str, out_dir: str) -> None:
@@ -215,12 +189,11 @@ def teardown_gst(cfg: Config, tunnels: list[str]) -> None:
     if not tunnels:
         return
     logging.info("ZGST: Stopping %d tunnel(s)", len(tunnels))
-    # for t in tunnels:
-    #     stop_tunnel(cfg, t)
-    # for t in tunnels:
-    #     status_tunnel(cfg, t, "STOPPED")
-    #     delete_tunnel(cfg, t)
-    stop_globus_streams(cfg, tunnels)
+    for t in tunnels:
+        stop_tunnel(cfg, t)
+    for t in tunnels:
+        status_tunnel(cfg, t, "STOPPED")
+        delete_tunnel(cfg, t)
 
 
 # ------------------------------------------------------------------------------
@@ -233,157 +206,66 @@ def _tail(p: subprocess.Popen[str]) -> str:
     return f"STDOUT:\n{(out or '')[-1500:]}\nSTDERR:\n{(err or '')[-1500:]}"
 
 
-TunnelWatch = Callable[[], dict]   # returns {tunnel_id: state} for tunnels that are NOT ACTIVE
-
-
-def _check_procs(procs: list[tuple[str, int, str, subprocess.Popen[str]]], done: set[int],
-                 mismatches: list[str]) -> None:
-    """Record finished processes; raise on any failure other than a PUSH/PULL mismatch."""
-    for k, (role, i, host, p) in enumerate(procs):
-        if k in done:
-            continue
-        rc = p.poll()
-        if rc is None:
-            continue
-        done.add(k)
-        if rc == 0:
-            continue
-        if role == "consumer" and rc == EXIT_MISMATCH:
-            mismatches.append(f"{role}-{i}@{host}")
-            continue
-        raise RuntimeError(f"ZMQ: {role} {i} on {host.upper()} failed (rc={rc})\n{_tail(p)}")
-
-
-def _tunnels_ok(tunnel_watch: Optional[TunnelWatch], when: str) -> None:
-    if tunnel_watch is None:
-        return
-    bad = tunnel_watch()
-    if bad:
-        raise RuntimeError(f"ZMQ: tunnel(s) not ACTIVE {when}: "
-                           + ", ".join(f"{t} = {st}" for t, st in bad.items()))
-
-
-def _wait_all(procs: list[tuple[str, int, str, subprocess.Popen[str]]], timeout: int,
-              tunnel_watch: Optional[TunnelWatch] = None, watch_every: float = 10.0) -> list[str]:
+def _wait_all(procs: list[tuple[str, int, str, subprocess.Popen[str]]], timeout: int) -> list[str]:
     deadline = time.monotonic() + timeout
-    next_watch = time.monotonic() + watch_every
     mismatches: list[str] = []
     done: set[int] = set()
     while len(done) < len(procs):
-        _check_procs(procs, done, mismatches)
-        if len(done) == len(procs):
-            break
+        for k, (role, i, host, p) in enumerate(procs):
+            if k in done:
+                continue
+            rc = p.poll()
+            if rc is None:
+                continue
+            done.add(k)
+            if rc == 0:
+                continue
+            if role == "consumer" and rc == EXIT_MISMATCH:
+                mismatches.append(f"{role}-{i}@{host}")
+                continue
+            raise RuntimeError(f"ZMQ: {role} {i} on {host.upper()} failed (rc={rc})\n{_tail(p)}")
         if time.monotonic() > deadline:
             raise TimeoutError(f"ZMQ: stream did not finish within {timeout}s")
-        if tunnel_watch is not None and time.monotonic() >= next_watch:
-            _tunnels_ok(tunnel_watch, "while streaming")
-            next_watch = time.monotonic() + watch_every
         time.sleep(0.5)
     return mismatches
 
 
-def _ready_count(cfg: Config, host: str, sync: str) -> list[int]:
-    """Indices of consumers whose ready file exists."""
-    cp = run_subprocess(host, None, f"ls {shlex.quote(sync)} 2>/dev/null || true",
-                        localhost=cfg.localhost, check=False)
-    return sorted(int(n.split("-", 1)[1]) for n in cp.stdout.split() if n.startswith("ready-"))
-
-
-def _barrier(cfg: Config, opts: ZmqOpts, procs, done, mismatches, *, cons_host: str, sync: str,
-             n: int, app_tag: str) -> None:
-    """Wait until every consumer has received its HEADER (whole path works)."""
-    deadline = time.monotonic() + opts.ready_timeout
-    ready: list[int] = []
-    while time.monotonic() < deadline:
-        _check_procs(procs, done, mismatches)          # a process that died before GO is an error
-        if done:
-            raise RuntimeError(f"ZMQ: {app_tag}: a process exited before the start barrier")
-        ready = _ready_count(cfg, cons_host, sync)
-        if len(ready) == n:
-            return
-        time.sleep(1.0)
-    missing = sorted(set(range(n)) - set(ready))
-    raise TimeoutError(f"ZMQ: {app_tag}: only {len(ready)}/{n} streams ready after "
-                       f"{opts.ready_timeout}s; not ready: {missing}")
-
-
-def _send_go(cfg: Config, prod_host: str, sync: str, delay_s: float = 1.0) -> None:
-    """Write the start time (now + delay, CLOCK_REALTIME of the producer host) atomically."""
-    q = shlex.quote(sync)
-    run_subprocess(prod_host, None,
-                   f"mkdir -p {q} && echo $(( $(date +%s%N) + {int(delay_s * 1e9)} )) > {q}/go.tmp "
-                   f"&& mv {q}/go.tmp {q}/go",
-                   localhost=cfg.localhost)
-
-
-def _leftovers(cfg: Config) -> dict[str, int]:
-    out = {}
-    for host in cfg.hosts.ep.values():
-        cp = run_subprocess(host, None, r"pgrep -fc '[z]mq_(producer|consumer)\.py' || true",
-                            localhost=cfg.localhost, check=False)
-        try:
-            n = int(cp.stdout.strip().splitlines()[-1])
-        except (ValueError, IndexError):
-            n = 0
-        if n:
-            out[host] = n
-    return out
-
-
 def run_stream(cfg: Config, opts: ZmqOpts, *, app_tag: str, out_dir: str, sample_size: int,
-               stream_bytes: int, producers: list[ProducerSpec], consumers: list[ConsumerSpec],
-               tunnel_watch: Optional[TunnelWatch] = None) -> None:
-    """statkit -> all producers + consumers in parallel -> wait until every consumer has its
-    HEADER -> (GST) tunnels ACTIVE -> GO: every producer starts sending at the same instant
-    -> wait (tunnels watched) -> no process may outlive the stream -> statkit stop."""
+               stream_bytes: int, producers: list[ProducerSpec], consumers: list[ConsumerSpec]) -> None:
     if len(producers) != len(consumers):
         raise RuntimeError(f"ZMQ: {len(producers)} producers vs {len(consumers)} consumers")
-    prod_hosts, cons_hosts = {p.host for p in producers}, {c.host for c in consumers}
-    if len(prod_hosts) != 1 or len(cons_hosts) != 1:
-        raise RuntimeError(f"ZMQ: producers/consumers must each be on one host: {prod_hosts} {cons_hosts}")
-    prod_host, cons_host = prod_hosts.pop(), cons_hosts.pop()
-    sync = sync_dir(out_dir, app_tag)
-    n = len(producers)
 
     procs: list[tuple[str, int, str, subprocess.Popen[str]]] = []
-    done: set[int] = set()
     statkit_on = False
     mismatches: list[str] = []
     try:
-        for host in (prod_host, cons_host):          # no stale barrier files from a retry
-            run_subprocess(host, None, f"rm -rf {shlex.quote(sync)} && mkdir -p {shlex.quote(sync)}",
-                           localhost=cfg.localhost)
         if not cfg.is_test:
             start_statkit_zmq(cfg, app_tag, out_dir)
             statkit_on = True
             time.sleep(opts.statkit_pad)
             check_statkit_alive(cfg, app_tag, out_dir)
 
-        logging.info("ZMQ: %s launching %d producer(s) and %d consumer(s): %d B x %d samples each",
-                     app_tag, n, n, sample_size, stream_bytes // sample_size)
+        logging.info("ZMQ: %s starting %d producer(s): %d B x %d samples each",
+                     app_tag, len(producers), sample_size, stream_bytes // sample_size)
         for i, spec in enumerate(producers):
-            cmd = producer_cmd(opts, spec, tag=f"{app_tag}-{i}", out_dir=out_dir, sample_size=sample_size,
-                               stream_bytes=stream_bytes, go_file=f"{sync}/go")
+            cmd = producer_cmd(opts, spec, tag=f"{app_tag}-{i}", out_dir=out_dir,
+                               sample_size=sample_size, stream_bytes=stream_bytes)
             procs.append(("producer", i, spec.host, popen_subprocess(spec.host, cfg.remote_env, cmd,
                                                                    localhost=cfg.localhost)))
+        time.sleep(cfg.sleep)
+        for role, i, host, p in procs:
+            if p.poll() is not None:
+                raise RuntimeError(f"ZMQ: {role} {i} on {host.upper()} exited early "
+                                   f"(rc={p.returncode})\n{_tail(p)}")
+
+        logging.info("ZMQ: %s starting %d consumer(s)", app_tag, len(consumers))
         for i, spec in enumerate(consumers):
-            cmd = consumer_cmd(opts, spec, tag=f"{app_tag}-{i}", out_dir=out_dir, sample_size=sample_size,
-                               ready_file=f"{sync}/ready-{i}")
+            cmd = consumer_cmd(opts, spec, tag=f"{app_tag}-{i}", out_dir=out_dir, sample_size=sample_size)
             procs.append(("consumer", i, spec.host, popen_subprocess(spec.host, cfg.remote_env, cmd,
                                                                    localhost=cfg.localhost)))
 
-        t_launch = time.monotonic()
-        _barrier(cfg, opts, procs, done, mismatches, cons_host=cons_host, sync=sync, n=n, app_tag=app_tag)
-        logging.info("ZMQ: %s all %d streams ready after %.1fs", app_tag, n, time.monotonic() - t_launch)
-        _tunnels_ok(tunnel_watch, "at the start barrier")
-        _send_go(cfg, prod_host, sync)
-        logging.info("ZMQ: %s GO sent: all producers start together", app_tag)
-
-        mismatches += _wait_all(procs, opts.stream_timeout, tunnel_watch)
+        mismatches = _wait_all(procs, opts.stream_timeout)
         logging.info("ZMQ: %s stream finished", app_tag)
-        left = _leftovers(cfg)
-        if left:
-            raise RuntimeError(f"ZMQ: {app_tag}: processes still running after the stream finished: {left}")
         if statkit_on:
             time.sleep(opts.statkit_pad)
     finally:
