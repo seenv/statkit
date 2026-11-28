@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pattern", choices=["pubsub", "pushpull"], default="pubsub")
     p.add_argument("--sample-size", type=int, required=True, help="Expected bytes per message")
     p.add_argument("--hwm", type=int, default=1000)
-    p.add_argument("--start-timeout", type=int, default=120, help="Seconds to wait for HEADER")
+    p.add_argument("--start-timeout", type=int, default=300, help="Seconds to wait for HEADER")
     p.add_argument("--idle-timeout", type=int, default=120, help="Max seconds between messages")
     p.add_argument("--out", required=True)
     p.add_argument("--tag", required=True)

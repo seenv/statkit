@@ -177,10 +177,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sample-size", type=int, required=True, help="Bytes per message")
     p.add_argument("--total-bytes", type=int, required=True, help="Bytes this stream sends")
     p.add_argument("--hwm", type=int, default=1000)
-    p.add_argument("--start-timeout", type=int, default=120, help="Seconds to wait for the consumer")
-    p.add_argument("--drain-timeout", type=int, default=120,
+    p.add_argument("--start-timeout", type=int, default=60, help="Seconds to wait for the consumer")
+    p.add_argument("--drain-timeout", type=int, default=300,
                    help="Seconds to wait after STOP for the consumer to disconnect")
-    p.add_argument("--linger-ms", type=int, default=6000)
+    p.add_argument("--linger-ms", type=int, default=60000)
     p.add_argument("--out", required=True)
     p.add_argument("--tag", required=True)
     return p.parse_args()
